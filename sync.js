@@ -41,12 +41,19 @@ async function start() {
       await auth.signOut(a);
       return;
     }
+    const provider = new auth.GoogleAuthProvider();
     try {
-      await auth.signInWithPopup(a, new auth.GoogleAuthProvider());
+      await auth.signInWithPopup(a, provider);
     } catch (e) {
-      if (e.code !== 'auth/popup-closed-by-user') alert('Accesso non riuscito: ' + e.message);
+      // Se il browser blocca il popup, uso il reindirizzamento della pagina.
+      if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
+        await auth.signInWithRedirect(a, provider);
+      } else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+        setStatus('⚠️', 'Accesso non riuscito: ' + e.message);
+      }
     }
   };
+  auth.getRedirectResult(a).catch(e => setStatus('⚠️', 'Accesso non riuscito: ' + e.message));
 
   auth.onAuthStateChanged(a, user => {
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }

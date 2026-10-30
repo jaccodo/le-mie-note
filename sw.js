@@ -1,6 +1,6 @@
 // Cache dei file dell'app: dopo la prima apertura funziona anche senza internet.
 // Cambia la versione quando modifichi i file, così il telefono scarica l'aggiornamento.
-const CACHE = 'note-v2';
+const CACHE = 'note-v3';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'sync.js', 'firebase-config.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
