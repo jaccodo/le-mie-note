@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#4f46e5">
+  <title>Le mie note</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-row">
+      <h1>Le mie note</h1>
+      <button id="menuBtn" class="icon-btn" aria-label="Menu">⋮</button>
+    </div>
+    <div class="search">
+      <input id="search" type="search" placeholder="Cerca nel testo o #tag…" autocomplete="off">
+    </div>
+    <nav id="catTabs" class="tabs"></nav>
+    <div class="filters">
+      <div id="prioChips" class="chips"></div>
+      <div id="tagChips" class="chips tags"></div>
+    </div>
+  </header>
+
+  <main>
+    <div id="wednesdayHint" class="hint" hidden></div>
+    <ul id="list" class="list"></ul>
+    <p id="empty" class="empty" hidden>Nessuna nota qui. Tocca + per aggiungerne una.</p>
+    <button id="toggleDone" class="link-btn"></button>
+  </main>
+
+  <button id="addBtn" class="fab" aria-label="Nuova nota">+</button>
+
+  <!-- Editor -->
+  <div id="sheet" class="sheet" hidden>
+    <form id="editor" class="sheet-body">
+      <div class="sheet-head">
+        <button type="button" id="cancelBtn" class="link-btn">Annulla</button>
+        <strong id="editorTitle">Nuova nota</strong>
+        <button type="submit" class="primary">Salva</button>
+      </div>
+      <input id="fTitle" placeholder="Titolo" required>
+      <textarea id="fBody" rows="5" placeholder="Testo (facoltativo)"></textarea>
+
+      <label class="field-label">Categoria</label>
+      <div id="fCat" class="seg"></div>
+
+      <label class="field-label">Priorità</label>
+      <div id="fPrio" class="seg"></div>
+
+      <label class="field-label">Tag <small>(separati da spazio o virgola)</small></label>
+      <input id="fTags" placeholder="es. spesa urgente telefonare">
+      <div id="tagSuggest" class="chips"></div>
+
+      <button type="button" id="deleteBtn" class="danger" hidden>Elimina nota</button>
+    </form>
+  </div>
+
+  <!-- Menu -->
+  <div id="menu" class="sheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <span></span><strong>Opzioni</strong>
+        <button type="button" id="menuClose" class="link-btn">Chiudi</button>
+      </div>
+      <button id="exportBtn" class="menu-item">⬇︎ Esporta backup (.json)</button>
+      <label class="menu-item">⬆︎ Importa backup
+        <input id="importInput" type="file" accept="application/json" hidden>
+      </label>
+      <button id="clearDoneBtn" class="menu-item">🧹 Elimina tutte le completate</button>
+      <p class="muted small" id="stats"></p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
