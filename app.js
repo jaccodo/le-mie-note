@@ -25,6 +25,20 @@ function save() {
   localStorage.setItem(STORE_KEY, JSON.stringify(notes));
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const byId = id => notes.find(n => n.id === id);
+
+// Ganci per la sincronizzazione (sync.js li sostituisce dopo il login).
+const sync = { push: () => {}, remove: () => {} };
+window.noteApp = {
+  sync,
+  getNotes: () => notes,
+  replaceAll(list) { notes = list; save(); render(); },
+};
+function changed(note) {
+  note.updated = Date.now();
+  save(); render();
+  sync.push(note);
+}
 
 function parseTags(str) {
   return [...new Set(str.split(/[\s,]+/).map(t => t.replace(/^#/, '').toLowerCase()).filter(Boolean))];
@@ -206,21 +220,23 @@ $('editor').onsubmit = e => {
     category: form.category,
     priority: form.priority,
     tags: parseTags($('fTags').value),
-    updated: Date.now(),
   };
   if (!data.title) return;
-  if (editing) Object.assign(editing, data);
-  else notes.push({ id: uid(), done: false, created: Date.now(), ...data });
-  save(); closeEditor(); render();
+  // Cerco per id: nel frattempo la lista può essere stata aggiornata dalla sync.
+  let note = editing && byId(editing.id);
+  if (note) Object.assign(note, data);
+  else notes.push(note = { id: uid(), done: false, created: Date.now(), ...data });
+  closeEditor();
+  changed(note);
 };
 $('cancelBtn').onclick = closeEditor;
 $('sheet').onclick = e => { if (e.target === $('sheet')) closeEditor(); };
 $('deleteBtn').onclick = () => {
-  const removed = editing;
-  const idx = notes.indexOf(removed);
-  notes.splice(idx, 1);
+  const removed = byId(editing.id) || editing;
+  notes = notes.filter(n => n.id !== removed.id);
   save(); closeEditor(); render();
-  toast('Nota eliminata', 'Annulla', () => { notes.splice(idx, 0, removed); save(); render(); });
+  sync.remove(removed.id);
+  toast('Nota eliminata', 'Annulla', () => { notes.push(removed); changed(removed); });
 };
 
 // ===== Eventi principali =====
@@ -241,11 +257,15 @@ $('tagChips').onclick = e => {
 $('toggleDone').onclick = () => { ui.showDone = !ui.showDone; render(); };
 $('list').onclick = e => {
   const li = e.target.closest('.item'); if (!li) return;
-  const note = notes.find(n => n.id === li.dataset.id);
+  const id = li.dataset.id;
+  const note = byId(id);
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'toggle') {
-    note.done = !note.done; note.updated = Date.now(); save(); render();
-    if (note.done) toast('Completata ✓', 'Annulla', () => { note.done = false; save(); render(); });
+    note.done = !note.done;
+    changed(note);
+    if (note.done) toast('Completata ✓', 'Annulla', () => {
+      const n = byId(id); if (n) { n.done = false; changed(n); }
+    });
   } else if (act === 'edit') {
     openEditor(note);
   }
@@ -272,10 +292,12 @@ $('importInput').onchange = async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data)) throw new Error();
-    const byId = new Map(notes.map(n => [n.id, n]));
-    data.forEach(n => { if (n.id && n.title) byId.set(n.id, { tags: [], body: '', ...n }); });
-    notes = [...byId.values()];
+    const merged = new Map(notes.map(n => [n.id, n]));
+    const imported = data.filter(n => n.id && n.title).map(n => ({ tags: [], body: '', ...n }));
+    imported.forEach(n => merged.set(n.id, n));
+    notes = [...merged.values()];
     save(); render(); $('menu').hidden = true;
+    imported.forEach(n => sync.push(n));
     toast(`Importate ${data.length} note`);
   } catch {
     toast('File non valido');
@@ -286,6 +308,7 @@ $('clearDoneBtn').onclick = () => {
   const n = notes.filter(x => x.done).length;
   if (!n) return toast('Nessuna nota completata');
   if (!confirm(`Eliminare ${n} note completate?`)) return;
+  notes.filter(x => x.done).forEach(x => sync.remove(x.id));
   notes = notes.filter(x => !x.done);
   save(); render(); $('menu').hidden = true;
 };

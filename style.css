@@ -147,6 +147,9 @@ mark { background: #fde68a; color: inherit; border-radius: 3px; }
   display: block; width: 100%; text-align: left; padding: 14px 12px;
   border: 0; border-radius: 10px; background: var(--bg); cursor: pointer;
 }
+.sync-status { font-size: 16px; vertical-align: middle; }
+.sync-box { background: var(--bg); border-radius: 10px; padding: 4px 12px 12px; }
+.sync-box[hidden] { display: none; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 

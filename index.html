@@ -13,7 +13,7 @@
 <body>
   <header class="top">
     <div class="top-row">
-      <h1>Le mie note</h1>
+      <h1>Le mie note <span id="syncStatus" class="sync-status"></span></h1>
       <button id="menuBtn" class="icon-btn" aria-label="Menu">⋮</button>
     </div>
     <div class="search">
@@ -67,6 +67,10 @@
         <span></span><strong>Opzioni</strong>
         <button type="button" id="menuClose" class="link-btn">Chiudi</button>
       </div>
+      <div id="syncBox" class="sync-box" hidden>
+        <p id="syncInfo" class="small"></p>
+        <button id="syncBtn" class="primary">Accedi con Google</button>
+      </div>
       <button id="exportBtn" class="menu-item">⬇︎ Esporta backup (.json)</button>
       <label class="menu-item">⬆︎ Importa backup
         <input id="importInput" type="file" accept="application/json" hidden>
@@ -79,5 +83,6 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="app.js"></script>
+  <script type="module" src="sync.js"></script>
 </body>
 </html>
