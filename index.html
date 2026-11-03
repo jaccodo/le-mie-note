@@ -29,7 +29,7 @@
   <main>
     <div id="hint" class="hint" hidden></div>
     <div id="tiles" class="tiles" hidden></div>
-    <h2 id="listTitle" class="list-title" hidden></h2>
+    <section id="agenda" class="agenda" hidden></section>
     <ul id="list" class="list"></ul>
     <p id="empty" class="empty" hidden></p>
   </main>
@@ -137,6 +137,7 @@
         <p id="syncInfo" class="small"></p>
         <button id="syncBtn" class="primary">Accedi con Google</button>
       </div>
+      <button id="calBtn" class="menu-item">📅 Google Calendar</button>
       <button id="reorderBtn" class="menu-item">↕︎ Cambia l'ordine dei riquadri</button>
       <button id="exportBtn" class="menu-item">⬇︎ Esporta backup (.json)</button>
       <label class="menu-item">⬆︎ Importa backup
@@ -144,6 +145,31 @@
       </label>
       <button id="clearDoneBtn" class="menu-item">🧹 Elimina le note completate</button>
       <p class="muted small" id="stats"></p>
+    </div>
+  </div>
+
+  <!-- Collegamento a Google Calendar -->
+  <div id="calSheet" class="sheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <span></span><strong>Google Calendar</strong>
+        <button type="button" class="link-btn" data-close>Chiudi</button>
+      </div>
+      <p class="muted small">Si fa una volta sola ed è più comodo dal PC. Serve un piccolo script sul tuo account Google, che legge il calendario e lo passa all'app.</p>
+      <ol class="cal-steps">
+        <li>Copia il codice, apri <a href="https://script.new" target="_blank" rel="noopener">script.new</a> con il tuo account, cancella quello che c'è e incollalo.
+          <textarea id="calCode" class="cal-code" rows="4" readonly aria-label="Codice dello script"></textarea>
+          <button type="button" id="calCopy" class="chip">Copia il codice</button>
+        </li>
+        <li>Salva, poi in alto <b>Esegui il deployment → Nuovo deployment</b>. Dall'ingranaggio scegli <b>App web</b>, con <b>Esegui come: Me</b> e <b>Chi può accedere: Chiunque</b>.</li>
+        <li>Conferma e concedi l'accesso. Se Google avvisa che l'app non è verificata: <b>Avanzate → Vai a…</b> È normale, perché lo script è tuo.</li>
+        <li>Copia l'<b>URL dell'app web</b> e incollalo qui.
+          <input id="calUrl" type="url" placeholder="https://script.google.com/…/exec" autocomplete="off" aria-label="URL dell'app web">
+        </li>
+      </ol>
+      <p class="muted small">L'URL dà accesso in lettura ai tuoi appuntamenti: non condividerlo con nessuno. Resta salvato solo su questo dispositivo, quindi su telefono e PC va incollato separatamente.</p>
+      <button type="button" id="calSave" class="primary">Collega</button>
+      <button type="button" id="calForget" class="danger" hidden>Scollega da questo dispositivo</button>
     </div>
   </div>
 

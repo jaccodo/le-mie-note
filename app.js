@@ -178,7 +178,7 @@ function go(col, keepFilters) {
   render();
   window.scrollTo(0, 0);
 }
-const SHEETS = ['sheet', 'menu', 'picker'];
+const SHEETS = ['sheet', 'menu', 'picker', 'calSheet'];
 function hideSheets() {
   SHEETS.forEach(id => { $(id).hidden = true; });
   editing = null;
@@ -243,18 +243,16 @@ function render() {
   const home = !col && !searching;
   $('tiles').hidden = !home;
   if (home) renderTiles();
+  $('agenda').hidden = !home;
+  if (home) renderAgenda();
   renderTabs(col, searching);
   renderChips(col);
   renderHint(col, home);
 
   const words = ui.q.split(/\s+/).filter(Boolean);
-  const shown = home
-    ? notes.slice().sort((a, b) => b.updated - a.updated).slice(0, 5)
-    : sorted(notes.filter(matches));
+  const shown = home ? [] : sorted(notes.filter(matches));
   $('list').innerHTML = shown.map(n => card(n, words, !col)).join('');
 
-  $('listTitle').hidden = !(home && shown.length);
-  $('listTitle').textContent = 'Ultime modifiche';
   $('empty').hidden = home || shown.length > 0;
   const filtering = ui.cat || ui.kind || ui.tag || ui.place;
   $('empty').textContent = searching ? `Nessun risultato per “${ui.q}”.`
@@ -778,10 +776,177 @@ $('clearDoneBtn').onclick = () => {
   save(); closeSheet(); render();
 };
 
+// ===== Agenda (Google Calendar) =====
+// Un piccolo script sull'account Google legge il calendario e lo passa all'app.
+// Il suo indirizzo è privato: resta su questo dispositivo, mai nel codice pubblico.
+const CAL_URL_KEY = 'le-mie-cose-calendario';
+const CAL_CACHE_KEY = 'le-mie-cose-agenda';
+const CAL_URL = /^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/;
+const CAL_REFRESH = 10 * 60 * 1000;
+const CAL_PREVIEW = 8;
+const CAL_SCRIPT = `function doGet() {
+  var from = new Date();
+  var to = new Date(from.getTime() + 60 * 24 * 60 * 60 * 1000);
+  var events = [];
+  CalendarApp.getAllCalendars().forEach(function (cal) {
+    if (!cal.isSelected()) return;
+    var zone = cal.getTimeZone();
+    cal.getEvents(from, to).forEach(function (e) {
+      var item = { title: e.getTitle(), place: e.getLocation(), color: cal.getColor() };
+      if (e.isAllDayEvent()) {
+        item.startDay = Utilities.formatDate(e.getAllDayStartDate(), zone, 'yyyy-MM-dd');
+        item.endDay = Utilities.formatDate(e.getAllDayEndDate(), zone, 'yyyy-MM-dd');
+      } else {
+        item.start = e.getStartTime().getTime();
+        item.end = e.getEndTime().getTime();
+      }
+      events.push(item);
+    });
+  });
+  return ContentService.createTextOutput(JSON.stringify({ events: events }))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+const agenda = { events: [], updated: 0, loading: false, error: false, showAll: false };
+try { Object.assign(agenda, JSON.parse(localStorage.getItem(CAL_CACHE_KEY)) || {}); } catch {}
+
+const calUrl = () => localStorage.getItem(CAL_URL_KEY) || '';
+const startOfDay = ms => new Date(ms).setHours(0, 0, 0, 0);
+// Gli eventi di un giorno intero arrivano come data, gli altri come istante preciso.
+function upcomingEvents() {
+  const now = Date.now();
+  return agenda.events.map(e => ({
+    ...e,
+    allDay: !!e.startDay,
+    start: e.startDay ? new Date(e.startDay + 'T00:00').getTime() : e.start,
+    end: e.startDay ? new Date(e.endDay + 'T00:00').getTime() : e.end,
+  })).filter(e => e.end > now).sort((a, b) => a.start - b.start || b.allDay - a.allDay);
+}
+function dayLabel(day) {
+  const diff = Math.round((day - startOfDay(Date.now())) / 864e5);
+  if (diff === 0) return 'Oggi';
+  if (diff === 1) return 'Domani';
+  return new Date(day).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+const clock = ms => new Date(ms).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+function dayUrl(day) {
+  const d = new Date(day);
+  return `https://calendar.google.com/calendar/r/day/${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+function agendaRow(e, day) {
+  const color = /^#[0-9a-f]{6}$/i.test(e.color) ? e.color : 'var(--muted)';
+  return `<a class="agenda-item" href="${dayUrl(day)}" target="_blank" rel="noopener">
+    <span class="agenda-dot" style="background:${color}"></span>
+    <span class="agenda-time">${e.allDay ? 'Tutto il giorno' : clock(e.start)}</span>
+    <span class="agenda-text">
+      <span class="agenda-title">${esc(String(e.title || '(Senza titolo)'))}</span>
+      ${e.place ? `<span class="agenda-place">${esc(String(e.place))}</span>` : ''}
+    </span>
+  </a>`;
+}
+function renderAgenda() {
+  const box = $('agenda');
+  if (!calUrl()) {
+    box.innerHTML = `<button class="agenda-connect" data-cal="setup">📅 Collega Google Calendar</button>`;
+    return;
+  }
+  const events = upcomingEvents();
+  const shown = agenda.showAll ? events : events.slice(0, CAL_PREVIEW);
+  let lastDay = null;
+  const rows = shown.map(e => {
+    // Un evento di più giorni già iniziato compare sotto Oggi.
+    const day = Math.max(startOfDay(e.start), startOfDay(Date.now()));
+    const head = day !== lastDay ? `<div class="agenda-day">${esc(dayLabel(day))}</div>` : '';
+    lastDay = day;
+    return head + agendaRow(e, day);
+  }).join('');
+  const message = agenda.error ? 'Non riesco ad aggiornare il calendario.'
+    : agenda.loading ? 'Aggiorno…'
+    : agenda.updated ? `Aggiornato: ${dayLabel(startOfDay(agenda.updated)).toLowerCase()} alle ${clock(agenda.updated)}` : '';
+  box.innerHTML = `
+    <div class="agenda-head">
+      <h2>Prossimi appuntamenti</h2>
+      <button class="icon-btn" data-cal="refresh" aria-label="Aggiorna il calendario">↻</button>
+    </div>
+    ${rows ? `<div class="agenda-card">${rows}</div>` : (agenda.updated ? '<p class="muted small">Nessun appuntamento nei prossimi 60 giorni.</p>' : '')}
+    ${events.length > shown.length ? `<button class="link-btn" data-cal="more">Mostra altri ${events.length - shown.length}</button>` : ''}
+    <p class="muted small agenda-status ${agenda.error ? 'agenda-error' : ''}">${esc(message)}
+      ${agenda.error ? '<button class="link-btn" data-cal="setup">Controlla il collegamento</button>' : ''}</p>`;
+}
+function showAgenda() {
+  if (!$('agenda').hidden) renderAgenda();
+}
+async function loadAgenda(force) {
+  const url = calUrl();
+  if (!url || agenda.loading || (!force && Date.now() - agenda.updated < CAL_REFRESH)) return;
+  agenda.loading = true;
+  agenda.error = false;
+  showAgenda();
+  try {
+    const data = await (await fetch(url)).json();
+    if (!Array.isArray(data.events)) throw new Error('Risposta non valida');
+    agenda.events = data.events;
+    agenda.updated = Date.now();
+    localStorage.setItem(CAL_CACHE_KEY, JSON.stringify({ events: agenda.events, updated: agenda.updated }));
+  } catch {
+    agenda.error = true;
+  }
+  agenda.loading = false;
+  showAgenda();
+}
+function forgetAgenda() {
+  localStorage.removeItem(CAL_URL_KEY);
+  localStorage.removeItem(CAL_CACHE_KEY);
+  Object.assign(agenda, { events: [], updated: 0, error: false, showAll: false });
+}
+function openCalSheet() {
+  $('calCode').value = CAL_SCRIPT;
+  $('calUrl').value = calUrl();
+  $('calForget').hidden = !calUrl();
+  showSheet('calSheet');
+  $('calSheet').querySelector('.sheet-body').scrollTop = 0;
+}
+$('agenda').onclick = e => {
+  const act = e.target.closest('[data-cal]')?.dataset.cal;
+  if (act === 'setup') openCalSheet();
+  if (act === 'refresh') loadAgenda(true);
+  if (act === 'more') { agenda.showAll = true; renderAgenda(); }
+};
+$('calBtn').onclick = openCalSheet;
+$('calCopy').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(CAL_SCRIPT);
+    toast('Codice copiato');
+  } catch {
+    $('calCode').select();
+    toast('Tieni premuto sul testo e copialo');
+  }
+};
+$('calSave').onclick = () => {
+  const url = $('calUrl').value.trim();
+  if (!CAL_URL.test(url)) { $('calUrl').focus(); return toast('Incolla l\'URL che finisce con /exec'); }
+  if (url !== calUrl()) forgetAgenda();
+  localStorage.setItem(CAL_URL_KEY, url);
+  closeSheet();
+  showAgenda();
+  loadAgenda(true);
+};
+$('calForget').onclick = () => {
+  forgetAgenda();
+  closeSheet();
+  showAgenda();
+  toast('Calendario scollegato');
+};
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  showAgenda();
+  loadAgenda();
+});
+
 // ===== Avvio =====
 if (history.state && history.state.sheet) history.replaceState({ inApp: history.state.inApp }, '');
 ui.col = colFromHash();
 render();
+loadAgenda();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
