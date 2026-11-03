@@ -92,7 +92,14 @@
 
       <div class="field">
         <label class="field-label" for="fBody">Appunti</label>
+        <div id="fFormat" class="format-bar" role="toolbar" aria-label="Formattazione">
+          <button type="button" data-marker="**" aria-label="Grassetto"><strong>G</strong></button>
+          <button type="button" data-marker="==" aria-label="Evidenziato"><mark class="hl">Ev</mark></button>
+          <button type="button" data-prefix="- " aria-label="Elenco puntato">• Elenco</button>
+          <button type="button" data-prefix="- [ ] " aria-label="Caselle da spuntare">☑ Lista</button>
+        </div>
         <textarea id="fBody" rows="3"></textarea>
+        <div id="fBodyPreview" class="body-preview" aria-label="Anteprima" hidden></div>
       </div>
 
       <div id="noteFields" class="field-group">
@@ -126,6 +133,7 @@
         <p id="syncInfo" class="small"></p>
         <button id="syncBtn" class="primary">Accedi con Google</button>
       </div>
+      <button id="reorderBtn" class="menu-item">↕︎ Cambia l'ordine dei riquadri</button>
       <button id="exportBtn" class="menu-item">⬇︎ Esporta backup (.json)</button>
       <label class="menu-item">⬆︎ Importa backup
         <input id="importInput" type="file" accept="application/json" hidden>

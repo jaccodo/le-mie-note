@@ -101,13 +101,40 @@ const sameText = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
 // ===== Helpers DOM =====
 const $ = id => document.getElementById(id);
 const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-function highlight(text, words) {
-  let html = esc(text);
+// Evidenzia le parole cercate senza toccare tag HTML ed entità già presenti.
+function markWords(html, words) {
   words.forEach(w => {
-    const re = new RegExp('(' + esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
-    html = html.replace(re, '<mark>$1</mark>');
+    const re = new RegExp('(<[^>]+>|&[#\\w]+;)|(' + esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    html = html.replace(re, (m, skip, hit) => skip ? m : `<mark>${hit}</mark>`);
   });
   return html;
+}
+const highlight = (text, words) => markWords(esc(text), words);
+
+// Formattazione degli appunti: resta testo normale con pochi simboli.
+// **grassetto**, ==evidenziato==, "- " elenco, "- [ ] " casella da spuntare.
+const CHECK_LINE = /^- \[( |x)\] ?(.*)$/i;
+const BULLET_LINE = /^- (.*)$/;
+const hasFormat = text => /\*\*.+?\*\*|==.+?==|^- /m.test(text);
+const hasList = text => /^- /m.test(text);
+const formatInline = html => html
+  .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  .replace(/==(.+?)==/g, '<mark class="hl">$1</mark>');
+function formatBody(text, words, interactive) {
+  const inline = s => markWords(formatInline(esc(s)), words) || '<br>';
+  return text.split('\n').map((line, i) => {
+    const check = CHECK_LINE.exec(line);
+    if (check) {
+      const on = check[1] !== ' ';
+      const box = interactive
+        ? `<button type="button" class="cb" data-act="check" data-line="${i}" aria-pressed="${on}" aria-label="Spunta">${on ? '☑' : '☐'}</button>`
+        : `<span class="cb">${on ? '☑' : '☐'}</span>`;
+      return `<div class="ln boxed ${on ? 'ticked' : ''}">${box}<span>${inline(check[2])}</span></div>`;
+    }
+    const bullet = BULLET_LINE.exec(line);
+    if (bullet) return `<div class="ln bullet"><span class="dot">•</span><span>${inline(bullet[1])}</span></div>`;
+    return `<div class="ln">${inline(line)}</div>`;
+  }).join('');
 }
 function toast(msg, actionLabel, action) {
   const t = $('toast');
@@ -239,7 +266,7 @@ function card(n, words, showCol) {
         <div class="title">${highlight(n.title, words)}</div>
         ${sub ? `<div class="sub">${highlight(sub, words)}</div>` : ''}
         ${ratingHtml(n.rating)}
-        ${n.body ? `<div class="body">${highlight(n.body, words)}</div>` : ''}
+        ${n.body ? `<div class="body ${hasList(n.body) ? 'full' : ''}">${formatBody(n.body, words, true)}</div>` : ''}
         <div class="meta">${[
           showCol ? `<span class="badge">${c.icon} ${esc(c.label)}</span>` : '',
           !ui.cat && cat ? `<span class="badge">${esc(cat.label)}</span>` : '',
@@ -251,8 +278,17 @@ function card(n, words, showCol) {
     </li>`;
 }
 
+// L'ordine dei riquadri è salvato su questo dispositivo.
+const ORDER_KEY = 'le-mie-cose-ordine';
+function orderedCollections() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(ORDER_KEY)) || []; } catch {}
+  const known = saved.map(colById).filter(Boolean);
+  return [...known, ...COLLECTIONS.filter(c => !known.includes(c))];
+}
 function renderTiles() {
-  $('tiles').innerHTML = COLLECTIONS.map(c => {
+  if (tileDrag.tile) return; // Non ridisegno mentre un riquadro viene trascinato.
+  $('tiles').innerHTML = orderedCollections().map(c => {
     const list = inCol(c.id);
     const done = list.filter(n => n.done).length;
     const open = list.length - done;
@@ -329,6 +365,8 @@ function openEditor(colId, note) {
   $('fTitle').value = note ? note.title : '';
   $('fBody').value = note ? note.body || '' : '';
   $('fBody').placeholder = 'Quello che vuoi ricordare (facoltativo)';
+  bodyLength = $('fBody').value.length;
+  renderBodyPreview();
   $('fPlace').value = note ? note.place || '' : (ui.col === col.id && ui.place) || '';
   $('fNewTag').value = '';
   $('fMaker').value = note ? note.maker || '' : '';
@@ -450,6 +488,86 @@ $('fNewTag').oninput = e => { if (e.target.value.includes(',')) addNewTag(); };
   };
 });
 
+// ----- Barra di formattazione -----
+let bodyLength = 0;
+function renderBodyPreview() {
+  const text = $('fBody').value.trim();
+  const show = hasFormat(text);
+  $('fBodyPreview').hidden = !show;
+  $('fBodyPreview').innerHTML = show ? formatBody(text, [], false) : '';
+}
+function bodyChanged() {
+  bodyLength = $('fBody').value.length;
+  renderBodyPreview();
+}
+// Mette o toglie i simboli attorno alla selezione, riga per riga.
+function toggleMarker(marker) {
+  const ta = $('fBody');
+  let start = ta.selectionStart;
+  let end = ta.selectionEnd;
+  const v = ta.value;
+  while (start < end && /\s/.test(v[start])) start++;
+  while (end > start && /\s/.test(v[end - 1])) end--;
+  const size = marker.length;
+  const lines = v.slice(start, end).split('\n');
+  const isWrapped = l => l.length > size * 2 && l.startsWith(marker) && l.endsWith(marker);
+  if (v.slice(start - size, start) === marker && v.slice(end, end + size) === marker) {
+    ta.setRangeText(v.slice(start, end), start - size, end + size, 'select');
+  } else if (start === end) {
+    ta.setRangeText(marker + marker, start, end, 'end');
+    ta.setSelectionRange(start + size, start + size);
+  } else if (lines.every(l => !l.trim() || isWrapped(l))) {
+    const plain = lines.map(l => l.trim() ? l.slice(size, -size) : l).join('\n');
+    ta.setRangeText(plain, start, end, 'select');
+  } else {
+    const wrapped = lines.map(l => l.trim() ? marker + l + marker : l).join('\n');
+    ta.setRangeText(wrapped, start, end, 'select');
+  }
+  ta.focus();
+  bodyChanged();
+}
+// Trasforma le righe selezionate in elenco o caselle (o le riporta a testo).
+function toggleLinePrefix(prefix) {
+  const ta = $('fBody');
+  const v = ta.value;
+  const from = v.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+  const nextBreak = v.indexOf('\n', ta.selectionEnd);
+  const to = nextBreak === -1 ? v.length : nextBreak;
+  const strip = l => l.replace(/^- \[( |x)\] ?/i, '').replace(/^- /, '');
+  const lines = v.slice(from, to).split('\n');
+  const isSame = l => prefix === '- ' ? BULLET_LINE.test(l) && !CHECK_LINE.test(l) : CHECK_LINE.test(l);
+  const remove = lines.every(isSame);
+  const result = lines.map(l => remove ? strip(l) : prefix + strip(l)).join('\n');
+  ta.setRangeText(result, from, to, 'end');
+  ta.focus();
+  bodyChanged();
+}
+// Il tocco sui pulsanti non deve togliere il cursore dal testo né chiudere la tastiera.
+$('fFormat').onpointerdown = e => e.preventDefault();
+$('fFormat').onmousedown = e => e.preventDefault();
+$('fFormat').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.marker) toggleMarker(b.dataset.marker);
+  else toggleLinePrefix(b.dataset.prefix);
+};
+// A capo in un elenco: continua l'elenco; a capo su una voce vuota: lo chiude.
+$('fBody').oninput = () => {
+  const ta = $('fBody');
+  const v = ta.value;
+  const pos = ta.selectionStart;
+  if (v[pos - 1] === '\n' && v.length === bodyLength + 1) {
+    const prevStart = v.lastIndexOf('\n', pos - 2) + 1;
+    const prev = v.slice(prevStart, pos - 1);
+    const prefix = CHECK_LINE.test(prev) ? '- [ ] ' : BULLET_LINE.test(prev) ? '- ' : null;
+    if (prefix) {
+      const empty = !(CHECK_LINE.exec(prev) || BULLET_LINE.exec(prev)).slice(-1)[0].trim();
+      if (empty) ta.setRangeText('', prevStart, pos, 'end');
+      else ta.setRangeText(prefix, pos, pos, 'end');
+    }
+  }
+  bodyChanged();
+};
+
 $('editor').onsubmit = e => {
   e.preventDefault();
   const title = $('fTitle').value.trim();
@@ -489,7 +607,7 @@ $('deleteBtn').onclick = () => {
 // ===== Eventi principali =====
 $('addBtn').onclick = () => {
   if (ui.col) return openEditor(ui.col);
-  $('pickerList').innerHTML = COLLECTIONS.map(c =>
+  $('pickerList').innerHTML = orderedCollections().map(c =>
     `<button data-pick="${c.id}"><span class="tile-icon">${c.icon}</span>${esc(c.add.replace(/^Nuov[oa] /, '').replace(/^./, m => m.toUpperCase()))}</button>`).join('');
   showSheet('picker');
 };
@@ -503,8 +621,53 @@ $('backBtn').onclick = () => {
 };
 $('search').oninput = e => { ui.q = e.target.value.trim(); render(); };
 $('tiles').onclick = e => {
+  if (tileDrag.justEnded) return;
   const b = e.target.closest('[data-go]'); if (b) go(b.dataset.go);
 };
+
+// Riordino: tieni premuto un riquadro finché si solleva, poi trascinalo.
+const LONG_PRESS_MS = 350;
+const MOVE_TOLERANCE = 10;
+const tileDrag = { tile: null, timer: null, x: 0, y: 0, justEnded: false };
+function cancelLongPress() { clearTimeout(tileDrag.timer); tileDrag.timer = null; }
+$('tiles').addEventListener('pointerdown', e => {
+  const tile = e.target.closest('.tile');
+  if (!tile || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  tileDrag.x = e.clientX; tileDrag.y = e.clientY;
+  cancelLongPress();
+  tileDrag.timer = setTimeout(() => {
+    tileDrag.timer = null;
+    tileDrag.tile = tile;
+    tile.classList.add('dragging');
+    document.body.classList.add('reordering');
+    if (navigator.vibrate) navigator.vibrate(15);
+  }, LONG_PRESS_MS);
+});
+document.addEventListener('pointermove', e => {
+  if (tileDrag.timer && Math.hypot(e.clientX - tileDrag.x, e.clientY - tileDrag.y) > MOVE_TOLERANCE) cancelLongPress();
+  if (!tileDrag.tile) return;
+  const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('.tile');
+  if (!over || over === tileDrag.tile) return;
+  const tiles = [...$('tiles').children];
+  const after = tiles.indexOf(tileDrag.tile) < tiles.indexOf(over);
+  $('tiles').insertBefore(tileDrag.tile, after ? over.nextSibling : over);
+});
+// Durante il trascinamento la pagina non deve scorrere (serve un ascolto non "passive").
+document.addEventListener('touchmove', e => { if (tileDrag.tile) e.preventDefault(); }, { passive: false });
+$('tiles').addEventListener('contextmenu', e => e.preventDefault());
+function endTileDrag() {
+  cancelLongPress();
+  if (!tileDrag.tile) return;
+  tileDrag.tile.classList.remove('dragging');
+  document.body.classList.remove('reordering');
+  tileDrag.tile = null;
+  localStorage.setItem(ORDER_KEY, JSON.stringify([...$('tiles').children].map(t => t.dataset.go)));
+  // Il dito che si alza genera anche un tocco: non deve aprire la sezione.
+  tileDrag.justEnded = true;
+  setTimeout(() => { tileDrag.justEnded = false; }, 300);
+}
+document.addEventListener('pointerup', endTileDrag);
+document.addEventListener('pointercancel', endTileDrag);
 $('hint').onclick = () => {
   if (ui.col === 'note') return;
   resetFilters(); ui.cat = 'lavoro'; go('note', true);
@@ -539,6 +702,12 @@ $('list').onclick = e => {
     else toast(`Spostato in ${col.done}`, 'Dai un voto', () => {
       const n = byId(id); if (n) openEditor(col.id, n);
     });
+  } else if (act === 'check') {
+    const lines = note.body.split('\n');
+    const i = +e.target.closest('[data-line]').dataset.line;
+    lines[i] = lines[i].replace(/^- \[( |x)\]/i, (m, x) => x === ' ' ? '- [x]' : '- [ ]');
+    note.body = lines.join('\n');
+    changed(note);
   } else if (act === 'edit') {
     openEditor(colOf(note), note);
   }
@@ -548,6 +717,11 @@ $('list').onclick = e => {
 $('menuBtn').onclick = () => {
   $('stats').textContent = COLLECTIONS.map(c => `${c.label}: ${inCol(c.id).length}`).join(' · ');
   showSheet('menu');
+};
+$('reorderBtn').onclick = () => {
+  closeSheet();
+  if (ui.col) go(null);
+  toast('Tieni premuto un riquadro e trascinalo dove vuoi');
 };
 $('exportBtn').onclick = () => {
   const blob = new Blob([JSON.stringify(notes, null, 2)], { type: 'application/json' });
