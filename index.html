@@ -148,6 +148,23 @@
     </div>
   </div>
 
+  <!-- Categorie delle note -->
+  <div id="catSheet" class="sheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <button type="button" class="link-btn" data-close>Annulla</button>
+        <strong>Categorie</strong>
+        <button type="button" id="catSave" class="primary">Salva</button>
+      </div>
+      <p class="muted small">Tocca un nome per cambiarlo. Puoi usare anche un'emoji.</p>
+      <div id="catList" class="cat-list"></div>
+      <div class="new-tag">
+        <input id="catNew" placeholder="Nuova categoria…" autocomplete="off" enterkeyhint="done" aria-label="Nuova categoria">
+        <button type="button" id="catNewBtn" class="chip">Aggiungi</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Collegamento a Google Calendar -->
   <div id="calSheet" class="sheet" hidden>
     <div class="sheet-body">

@@ -39,7 +39,7 @@ const COLLECTIONS = [
   { id: 'note', label: 'Note', add: 'Nuova nota', icon: '📝', titleHint: 'Titolo',
     todo: 'Da fare', done: 'Completate' },
 ];
-const CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   { id: 'casa',   label: '🏠 Casa' },
   { id: 'lavoro', label: '💼 Lavoro (mer)' },
   { id: 'idee',   label: '💡 Idee' },
@@ -54,11 +54,31 @@ const WORK_DAY = 3; // 0 = domenica ... 3 = mercoledì
 // ===== Dati =====
 const STORE_KEY = 'note-app-v1';
 let notes = load();
+// Le categorie si possono cambiare dall'app. "updated" dice quale versione è la più recente.
+const CAT_KEY = 'le-mie-cose-categorie';
+const CAT_DOC = '_categorie';
+let catDoc = loadCategories();
 const ui = { col: null, tab: 'todo', cat: null, kind: null, tag: null, place: null, q: '' };
 
 function load() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }
   catch { return []; }
+}
+function loadCategories() {
+  try {
+    const doc = JSON.parse(localStorage.getItem(CAT_KEY));
+    if (doc && Array.isArray(doc.list)) return doc;
+  } catch {}
+  return { list: DEFAULT_CATEGORIES, updated: 0 };
+}
+function storeCategories(doc) {
+  catDoc = { list: doc.list, updated: doc.updated };
+  localStorage.setItem(CAT_KEY, JSON.stringify(catDoc));
+  render();
+}
+function saveCategories(list) {
+  storeCategories({ list, updated: Date.now() });
+  sync.pushCategories(catDoc);
 }
 function save() {
   localStorage.setItem(STORE_KEY, JSON.stringify(notes));
@@ -70,11 +90,14 @@ const colById = id => COLLECTIONS.find(c => c.id === id);
 const inCol = id => notes.filter(n => colOf(n) === id);
 
 // Ganci per la sincronizzazione (sync.js li sostituisce dopo il login).
-const sync = { push: () => {}, remove: () => {} };
+const sync = { push: () => {}, remove: () => {}, pushCategories: () => {} };
 window.noteApp = {
   sync,
   getNotes: () => notes,
   replaceAll(list) { notes = list; save(); render(); },
+  CAT_DOC,
+  getCategories: () => catDoc,
+  setCategories(doc) { if (Array.isArray(doc.list)) storeCategories(doc); },
 };
 function changed(note) {
   note.updated = Date.now();
@@ -178,7 +201,7 @@ function go(col, keepFilters) {
   render();
   window.scrollTo(0, 0);
 }
-const SHEETS = ['sheet', 'menu', 'picker', 'calSheet'];
+const SHEETS = ['sheet', 'menu', 'picker', 'calSheet', 'catSheet'];
 function hideSheets() {
   SHEETS.forEach(id => { $(id).hidden = true; });
   editing = null;
@@ -265,7 +288,7 @@ function ratingHtml(r) {
 }
 function card(n, words, showCol) {
   const c = colById(colOf(n));
-  const cat = CATEGORIES.find(x => x.id === n.category);
+  const cat = catDoc.list.find(x => x.id === n.category);
   const prio = PRIORITIES.find(p => p.id === n.priority);
   const sub = [n.kind, n.maker, n.place, n.extra].filter(Boolean).join(' · ');
   const mapUrl = c.maps && c.maps(n)
@@ -330,7 +353,9 @@ function renderChips(col) {
     if (ui.tag && !tags.includes(ui.tag)) ui.tag = null;
     const tagChips = tags.map(t => `<button class="chip ${ui.tag === t ? 'on' : ''}" data-tag="${esc(t)}">${col.tagPresets ? '' : '#'}${esc(t)}</button>`).join('');
     if (col.kinds) html = col.kinds.map(k => `<button class="chip ${ui.kind === k ? 'on' : ''}" data-kind="${esc(k)}">${esc(k)}</button>`).join('');
-    if (col.id === 'note') html = CATEGORIES.map(c => `<button class="chip ${ui.cat === c.id ? 'on' : ''}" data-cat="${c.id}">${esc(c.label)}</button>`).join('');
+    if (ui.cat && !catDoc.list.some(c => c.id === ui.cat)) ui.cat = null;
+    if (col.id === 'note') html = '<button class="chip" data-edit-cats="1">✎ Categorie</button>'
+      + catDoc.list.map(c => `<button class="chip ${ui.cat === c.id ? 'on' : ''}" data-cat="${esc(c.id)}">${esc(c.label)}</button>`).join('');
     html += tagChips;
     if (col.place && col.place.filter) {
       const places = usedValues(col.id, 'place');
@@ -347,7 +372,8 @@ function renderHint(col, home) {
   const hint = $('hint');
   const pending = inCol('note').filter(n => n.category === 'lavoro' && !n.done).length;
   const isWorkDay = new Date().getDay() === WORK_DAY;
-  hint.hidden = !((home && isWorkDay) || (col && col.id === 'note' && ui.cat === 'lavoro'));
+  const hasWork = catDoc.list.some(c => c.id === 'lavoro');
+  hint.hidden = !hasWork || !((home && isWorkDay) || (col && col.id === 'note' && ui.cat === 'lavoro'));
   if (!hint.hidden) hint.textContent = `📅 ${nextWorkDayLabel()} · ${pending} da fare`;
 }
 function nextWorkDayLabel() {
@@ -370,7 +396,7 @@ function openEditor(colId, note) {
   form = note
     ? { col: col.id, done: !!note.done, rating: note.rating || 0, kind: note.kind || null, category: note.category || null, priority: note.priority || null, tags: [...(note.tags || [])] }
     : { col: col.id, done: ui.col === col.id && ui.tab === 'done', rating: 0, kind: ui.col === col.id ? ui.kind : null,
-        category: ui.cat || CATEGORIES[0].id, priority: 'media', tags: ui.col === col.id && ui.tag ? [ui.tag] : [] };
+        category: ui.cat || catDoc.list[0]?.id || null, priority: 'media', tags: ui.col === col.id && ui.tag ? [ui.tag] : [] };
 
   document.body.dataset.col = col.id;
   $('editorTitle').textContent = note ? 'Modifica' : col.add;
@@ -421,8 +447,8 @@ function renderEditorSegs() {
     `<button type="button" data-v="${v}" class="${form.rating >= v ? 'on' : ''}" aria-label="${v} su 5">★</button>`).join('');
   $('fKind').innerHTML = (col.kinds || []).map(k =>
     `<button type="button" data-v="${esc(k)}" class="${form.kind === k ? 'on' : ''}">${esc(k)}</button>`).join('');
-  $('fCat').innerHTML = CATEGORIES.map(c =>
-    `<button type="button" data-v="${c.id}" class="${form.category === c.id ? 'on' : ''}">${esc(c.label)}</button>`).join('');
+  $('fCat').innerHTML = catDoc.list.map(c =>
+    `<button type="button" data-v="${esc(c.id)}" class="${form.category === c.id ? 'on' : ''}">${esc(c.label)}</button>`).join('');
   $('fPrio').innerHTML = [...PRIORITIES, { id: null, label: 'Nessuna' }].map(p =>
     `<button type="button" data-v="${p.id ?? ''}" class="${form.priority === p.id ? 'on' : ''}">${p.label}</button>`).join('');
 }
@@ -696,6 +722,7 @@ $('statusTabs').onclick = e => {
 };
 $('chips').onclick = $('placeChips').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.editCats) return openCatSheet();
   const { kind, cat, tag, place } = b.dataset;
   if (kind) ui.kind = ui.kind === kind ? null : kind;
   if (cat) ui.cat = ui.cat === cat ? null : cat;
@@ -742,7 +769,7 @@ $('reorderBtn').onclick = () => {
   toast('Tieni premuto un riquadro e trascinalo dove vuoi');
 };
 $('exportBtn').onclick = () => {
-  const blob = new Blob([JSON.stringify(notes, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify([...notes, { id: CAT_DOC, ...catDoc }], null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `le-mie-cose-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -754,6 +781,8 @@ $('importInput').onchange = async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data)) throw new Error();
+    const cats = data.find(n => n && n.id === CAT_DOC);
+    if (cats && cats.updated > catDoc.updated) window.noteApp.setCategories(cats);
     const merged = new Map(notes.map(n => [n.id, n]));
     const imported = data.filter(n => n.id && n.title).map(n => ({ tags: [], body: '', ...n }));
     imported.forEach(n => merged.set(n.id, n));
@@ -774,6 +803,57 @@ $('clearDoneBtn').onclick = () => {
   toClear.forEach(x => sync.remove(x.id));
   notes = notes.filter(x => !toClear.includes(x));
   save(); closeSheet(); render();
+};
+
+// ===== Categorie delle note =====
+let catDraft = [];
+function readCatDraft() {
+  $('catList').querySelectorAll('input').forEach((input, i) => { catDraft[i].label = input.value; });
+}
+function renderCatDraft() {
+  $('catList').innerHTML = catDraft.map(c => `<div class="cat-row">
+    <input value="${esc(c.label)}" autocomplete="off" aria-label="Nome della categoria">
+    <button type="button" class="icon-btn" data-del="${esc(c.id)}" aria-label="Elimina ${esc(c.label)}">🗑️</button>
+  </div>`).join('');
+}
+function openCatSheet() {
+  catDraft = catDoc.list.map(c => ({ ...c }));
+  $('catNew').value = '';
+  renderCatDraft();
+  showSheet('catSheet');
+}
+function addCatDraft() {
+  const label = $('catNew').value.trim();
+  if (!label) return;
+  readCatDraft();
+  catDraft.push({ id: uid(), label });
+  $('catNew').value = '';
+  renderCatDraft();
+}
+$('catList').onclick = e => {
+  const id = e.target.closest('[data-del]')?.dataset.del;
+  if (!id) return;
+  readCatDraft();
+  const used = inCol('note').filter(n => n.category === id).length;
+  if (used && !confirm(`Le note di questa categoria (${used}) non verranno cancellate, ma resteranno senza categoria. Eliminarla?`)) return;
+  catDraft = catDraft.filter(c => c.id !== id);
+  renderCatDraft();
+};
+$('catNewBtn').onclick = addCatDraft;
+$('catNew').onkeydown = e => {
+  if (e.key === 'Enter') { e.preventDefault(); addCatDraft(); }
+};
+$('catSave').onclick = () => {
+  readCatDraft();
+  addCatDraft(); // Una categoria scritta ma non ancora aggiunta non deve andare persa.
+  const list = catDraft.map(c => ({ ...c, label: c.label.trim() }));
+  if (list.some(c => !c.label)) return toast('Ogni categoria deve avere un nome');
+  if (new Set(list.map(c => c.label.toLowerCase())).size < list.length) return toast('Ci sono due categorie con lo stesso nome');
+  const kept = new Set(list.map(c => c.id));
+  const removed = new Set(catDoc.list.filter(c => !kept.has(c.id)).map(c => c.id));
+  closeSheet();
+  saveCategories(list);
+  inCol('note').filter(n => removed.has(n.category)).forEach(n => { n.category = null; changed(n); });
 };
 
 // ===== Agenda (Google Calendar) =====

@@ -295,3 +295,8 @@ mark:not(.hl) { background: #f5b971; color: #24201a; border-radius: 3px; }
 .cal-steps { margin: 0; padding-left: 20px; display: grid; gap: 10px; font-size: 14px; }
 .cal-steps a { color: var(--accent); }
 .sheet-body textarea.cal-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; white-space: pre; overflow: auto; }
+
+/* Categorie delle note */
+.cat-list { display: grid; gap: 6px; }
+.cat-row { display: flex; align-items: center; gap: 4px; }
+.cat-row input { flex: 1; min-width: 0; }

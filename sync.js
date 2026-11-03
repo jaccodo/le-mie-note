@@ -59,6 +59,7 @@ async function start() {
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
     app.sync.push = () => {};
     app.sync.remove = () => {};
+    app.sync.pushCategories = () => {};
     if (!user) {
       btn.textContent = 'Accedi con Google';
       setStatus('', 'Non sincronizzato: accedi per avere le note su tutti i dispositivi');
@@ -73,9 +74,17 @@ async function start() {
 
     app.sync.push = note => fs.setDoc(fs.doc(col, note.id), note);
     app.sync.remove = id => fs.deleteDoc(fs.doc(col, id));
+    app.sync.pushCategories = doc => fs.setDoc(fs.doc(col, app.CAT_DOC), doc);
 
     unsubscribe = fs.onSnapshot(col, { includeMetadataChanges: true }, snap => {
       const remote = new Map(snap.docs.map(d => [d.id, d.data()]));
+
+      // Le categorie viaggiano con le note, ma non sono una nota: vince la versione più recente.
+      const remoteCats = remote.get(app.CAT_DOC);
+      remote.delete(app.CAT_DOC);
+      const localCats = app.getCategories();
+      if (remoteCats && remoteCats.updated > localCats.updated) app.setCategories(remoteCats);
+      else if (localCats.updated > (remoteCats ? remoteCats.updated : 0)) app.sync.pushCategories(localCats);
 
       if (first) {
         // Primo collegamento: unisce le note locali con quelle online.
