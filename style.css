@@ -17,6 +17,7 @@
   --c-film: #2f4f86;
   --c-luoghi: #2c6e55;
   --c-attivita: #9a6300;
+  --c-regali: #a83e6b;
   --c-note: #5a5570;
 }
 @media (prefers-color-scheme: dark) {
@@ -39,6 +40,7 @@
     --c-film: #92b2ea;
     --c-luoghi: #7bcbab;
     --c-attivita: #e3b257;
+    --c-regali: #ec9bbd;
     --c-note: #b9b4d4;
   }
 }
@@ -50,12 +52,14 @@ body[data-col="vini"] { --accent: var(--c-vini); }
 body[data-col="film"] { --accent: var(--c-film); }
 body[data-col="luoghi"] { --accent: var(--c-luoghi); }
 body[data-col="attivita"] { --accent: var(--c-attivita); }
+body[data-col="regali"] { --accent: var(--c-regali); }
 body[data-col="note"] { --accent: var(--c-note); }
 .tile[data-go="ristoranti"], .picker-list [data-pick="ristoranti"] { --tile: var(--c-ristoranti); }
 .tile[data-go="vini"], .picker-list [data-pick="vini"] { --tile: var(--c-vini); }
 .tile[data-go="film"], .picker-list [data-pick="film"] { --tile: var(--c-film); }
 .tile[data-go="luoghi"], .picker-list [data-pick="luoghi"] { --tile: var(--c-luoghi); }
 .tile[data-go="attivita"], .picker-list [data-pick="attivita"] { --tile: var(--c-attivita); }
+.tile[data-go="regali"], .picker-list [data-pick="regali"] { --tile: var(--c-regali); }
 .tile[data-go="note"], .picker-list [data-pick="note"] { --tile: var(--c-note); }
 
 * { box-sizing: border-box; }
@@ -158,6 +162,7 @@ body.reordering .tile:not(.dragging) { opacity: .75; }
 .item.done .check::before { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .item[data-col="note"].done .title { text-decoration: line-through; color: var(--muted); }
 .content { flex: 1; min-width: 0; padding: 8px 6px 8px 0; cursor: pointer; }
+.content:first-child { padding-left: 12px; }
 .title { font-weight: 600; overflow-wrap: anywhere; }
 .sub { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
 .body { color: var(--muted); font-size: 14px; margin-top: 3px; white-space: pre-wrap; overflow-wrap: anywhere;

@@ -31,6 +31,11 @@ const COLLECTIONS = [
     extra: { label: 'Quando', hint: 'es. estate, weekend' },
     tagPresets: ['All\'aperto', 'Sport', 'Cultura', 'Relax', 'Con amici', 'In famiglia'],
     maps: n => !!n.place },
+  { id: 'regali', label: 'Idee regalo', add: 'Nuova idea regalo', icon: '🎁', titleHint: 'Cosa regalare',
+    todo: 'Da regalare', noStatus: true,
+    place: { label: 'Per chi', hint: 'es. Mamma, Luca', filter: true, suggest: true, icon: '👤' },
+    link: { label: 'Link', hint: 'Incolla il link (facoltativo)' },
+    tagPresets: ['Compleanno', 'Natale', 'Anniversario', 'Laurea'] },
   { id: 'note', label: 'Note', add: 'Nuova nota', icon: '📝', titleHint: 'Titolo',
     todo: 'Da fare', done: 'Completate' },
 ];
@@ -95,6 +100,15 @@ function usedValues(colId, field) {
     found.set(key, entry);
   });
   return [...found.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).map(e => e.label);
+}
+// Accetta anche il testo copiato da "Condividi" (es. "Nome prodotto https://...") e i link senza https.
+function linkUrl(text) {
+  const s = (text || '').trim();
+  const found = s.match(/https?:\/\/\S+/i);
+  try {
+    const url = new URL(found ? found[0] : 'https://' + s);
+    return url.hostname.includes('.') ? url.href : '';
+  } catch { return ''; }
 }
 const sameText = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
 
@@ -194,7 +208,7 @@ document.addEventListener('click', e => {
 
 // ===== Filtri e ordinamento =====
 function searchable(n) {
-  return [n.title, n.body, n.maker, n.place, n.extra, n.kind, ...(n.tags || []).map(t => '#' + t)].filter(Boolean).join(' ').toLowerCase();
+  return [n.title, n.body, n.maker, n.place, n.extra, n.link, n.kind, ...(n.tags || []).map(t => '#' + t)].filter(Boolean).join(' ').toLowerCase();
 }
 function matches(n) {
   if (ui.col && colOf(n) !== ui.col) return false;
@@ -206,7 +220,7 @@ function matches(n) {
     const hay = searchable(n);
     return ui.q.toLowerCase().split(/\s+/).filter(Boolean).every(w => hay.includes(w));
   }
-  return ui.col ? !!n.done === (ui.tab === 'done') : true;
+  return ui.col && !colById(ui.col).noStatus ? !!n.done === (ui.tab === 'done') : true;
 }
 const prioRank = p => (PRIORITIES.find(x => x.id === p) || { rank: 9 }).rank;
 function sorted(list) {
@@ -261,7 +275,7 @@ function card(n, words, showCol) {
     : null;
   return `
     <li class="item ${n.done ? 'done' : ''}" data-id="${n.id}" data-col="${c.id}">
-      <button class="check" data-act="toggle" aria-label="${esc(n.done ? c.todo : c.done)}"></button>
+      ${c.noStatus ? '' : `<button class="check" data-act="toggle" aria-label="${esc(n.done ? c.todo : c.done)}"></button>`}
       <div class="content" data-act="edit">
         <div class="title">${highlight(n.title, words)}</div>
         ${sub ? `<div class="sub">${highlight(sub, words)}</div>` : ''}
@@ -274,6 +288,7 @@ function card(n, words, showCol) {
           ...(n.tags || []).map(t => `<span class="badge tag">${c.tagPresets ? '' : '#'}${esc(t)}</span>`),
         ].join('')}</div>
       </div>
+      ${n.link ? `<a class="pin" href="${esc(n.link)}" target="_blank" rel="noopener" aria-label="Apri il link">🔗</a>` : ''}
       ${mapUrl ? `<a class="pin" href="${esc(mapUrl)}" target="_blank" rel="noopener" aria-label="Apri in Maps">📍</a>` : ''}
     </li>`;
 }
@@ -292,7 +307,7 @@ function renderTiles() {
     const list = inCol(c.id);
     const done = list.filter(n => n.done).length;
     const open = list.length - done;
-    const count = list.length ? `${c.todo} ${open} · ${c.done} ${done}` : 'Ancora vuoto';
+    const count = !list.length ? 'Ancora vuoto' : c.noStatus ? `${c.todo} ${open}` : `${c.todo} ${open} · ${c.done} ${done}`;
     return `<button class="tile" data-go="${c.id}">
       <span class="tile-icon">${c.icon}</span>
       <span class="tile-name">${esc(c.label)}</span>
@@ -301,8 +316,8 @@ function renderTiles() {
   }).join('');
 }
 function renderTabs(col, searching) {
-  $('statusTabs').hidden = !col || searching;
-  if (!col) return;
+  $('statusTabs').hidden = !col || searching || col.noStatus;
+  if (!col || col.noStatus) return;
   const list = inCol(col.id);
   const doneCount = list.filter(n => n.done).length;
   $('statusTabs').innerHTML = [['todo', col.todo, list.length - doneCount], ['done', col.done, doneCount]].map(([id, label, n]) =>
@@ -349,7 +364,7 @@ function nextWorkDayLabel() {
 // ===== Editor =====
 let editing = null;
 let form = {};
-const TEXT_FIELDS = [['Maker', 'maker'], ['Place', 'place'], ['Extra', 'extra']];
+const TEXT_FIELDS = [['Maker', 'maker'], ['Place', 'place'], ['Extra', 'extra'], ['Link', 'link']];
 
 function openEditor(colId, note) {
   const col = colById(colId);
@@ -371,6 +386,7 @@ function openEditor(colId, note) {
   $('fNewTag').value = '';
   $('fMaker').value = note ? note.maker || '' : '';
   $('fExtra').value = note ? note.extra || '' : '';
+  $('fLink').value = note ? note.link || '' : '';
   $('fTags').value = note ? (note.tags || []).join(' ') : (ui.tag || '');
   $('deleteBtn').hidden = !note;
 
@@ -379,7 +395,7 @@ function openEditor(colId, note) {
     if (f) { $(`f${k}Label`).textContent = f.label; $(`f${k}`).placeholder = f.hint; }
   });
   $('noteFields').hidden = col.id !== 'note';
-  $('fStatus').hidden = col.id === 'note';
+  $('fStatus').hidden = col.id === 'note' || col.noStatus;
   $('fKindWrap').hidden = !col.kinds;
   $('fKindLabel').textContent = col.kindLabel || '';
   $('fTagChoiceWrap').hidden = !col.tagPresets;
@@ -395,7 +411,7 @@ function openEditor(colId, note) {
 
 function renderEditorSegs() {
   const col = colById(form.col);
-  $('fStatus').innerHTML = [[false, col.todo], [true, col.done]].map(([v, label]) =>
+  $('fStatus').innerHTML = (col.noStatus ? [] : [[false, col.todo], [true, col.done]]).map(([v, label]) =>
     `<button type="button" data-v="${v}" class="${form.done === v ? 'on' : ''}">${esc(label)}</button>`).join('');
   // Alcuni campi spariscono in base alla tipologia: una cantina non ha annata.
   TEXT_FIELDS.forEach(([k, key]) => {
@@ -573,6 +589,9 @@ $('editor').onsubmit = e => {
   const title = $('fTitle').value.trim();
   if (!title) { $('fTitle').focus(); return toast('Scrivi almeno il nome'); }
   const isNote = form.col === 'note';
+  const rawLink = $('fLinkWrap').hidden ? '' : $('fLink').value.trim();
+  const link = rawLink ? linkUrl(rawLink) : '';
+  if (rawLink && !link) { $('fLink').focus(); return toast('Il link non sembra valido'); }
   addNewTag(); // Un tag scritto ma non ancora aggiunto non deve andare perso.
   const data = {
     col: form.col,
@@ -581,6 +600,7 @@ $('editor').onsubmit = e => {
     maker: $('fMakerWrap').hidden ? '' : $('fMaker').value.trim(),
     place: $('fPlaceWrap').hidden ? '' : $('fPlace').value.trim(),
     extra: $('fExtraWrap').hidden ? '' : $('fExtra').value.trim(),
+    link,
     kind: form.kind,
     rating: form.done && !isNote ? form.rating : 0,
     done: form.done,
