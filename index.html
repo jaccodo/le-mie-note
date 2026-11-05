@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f3ec">
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14120f">
-  <title>Le mie cose</title>
+  <title>Jaccodo 🧠</title>
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -15,7 +15,7 @@
   <header class="top">
     <div class="top-row">
       <button id="backBtn" class="icon-btn" aria-label="Indietro" hidden>←</button>
-      <h1><span id="heading">Le mie cose</span> <span id="syncStatus" class="sync-status"></span></h1>
+      <h1><span id="heading">Jaccodo 🧠</span> <span id="syncStatus" class="sync-status"></span></h1>
       <button id="menuBtn" class="icon-btn" aria-label="Menu">⋮</button>
     </div>
     <div class="search">
@@ -85,6 +85,12 @@
         <label class="field-label" id="fLinkLabel" for="fLink"></label>
         <input id="fLink" type="url" autocomplete="off" enterkeyhint="done">
       </div>
+      <div id="fFileWrap" class="field">
+        <span class="field-label">File</span>
+        <label class="chip file-pick">📎 <span id="fFileName"></span>
+          <input id="fFile" type="file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" hidden>
+        </label>
+      </div>
       <div id="fTagChoiceWrap" class="field">
         <span class="field-label">Tag <small>(puoi sceglierne più di uno)</small></span>
         <div id="fTagChoice" class="tag-choice"></div>
@@ -138,6 +144,7 @@
         <button id="syncBtn" class="primary">Accedi con Google</button>
       </div>
       <button id="calBtn" class="menu-item">📅 Google Calendar</button>
+      <button id="backupBtn" class="menu-item">☁️ Backup su Drive</button>
       <button id="reorderBtn" class="menu-item">↕︎ Cambia l'ordine dei riquadri</button>
       <button id="exportBtn" class="menu-item">⬇︎ Esporta backup (.json)</button>
       <label class="menu-item">⬆︎ Importa backup
@@ -145,6 +152,49 @@
       </label>
       <button id="clearDoneBtn" class="menu-item">🧹 Elimina le note completate</button>
       <p class="muted small" id="stats"></p>
+    </div>
+  </div>
+
+  <!-- Apertura di un documento -->
+  <div id="fileSheet" class="sheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <span></span><strong id="fileTitle"></strong>
+        <button type="button" class="link-btn" data-close>Chiudi</button>
+      </div>
+      <p id="fileInfo" class="muted small"></p>
+      <img id="fileImg" class="file-img" alt="Anteprima del documento" hidden>
+      <a id="fileDownload" class="primary file-action">Apri o scarica</a>
+      <button type="button" id="fileShare" class="chip file-action" hidden>Condividi</button>
+    </div>
+  </div>
+
+  <!-- Backup automatico su Drive -->
+  <div id="backupSheet" class="sheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <span></span><strong>Backup su Drive</strong>
+        <button type="button" class="link-btn" data-close>Chiudi</button>
+      </div>
+      <p id="backupStatus" class="small"></p>
+      <p class="muted small">Ogni documento nuovo viene copiato nella cartella "Jaccodo backup" del tuo Drive quando l'app è aperta e c'è internet. Eliminando un documento dall'app, la copia su Drive resta.</p>
+      <ol class="cal-steps">
+        <li>Copia il codice aggiornato, apri il tuo script su <a href="https://script.google.com" target="_blank" rel="noopener">script.google.com</a>, seleziona tutto il codice vecchio e sostituiscilo. Salva.
+          <textarea id="backupCode" class="cal-code" rows="4" readonly aria-label="Codice dello script"></textarea>
+          <button type="button" id="backupCopy" class="chip">Copia il codice</button>
+        </li>
+        <li>Scegli <b>doGet</b> e tocca <b>Esegui</b>: Google chiederà di autorizzare anche Drive.</li>
+        <li><b>Esegui il deployment → Gestisci deployment → matita ✏️ → Versione: Nuova versione</b>, poi conferma. L'indirizzo resta lo stesso.</li>
+        <li>Torna qui e attiva il backup. Va attivato sul dispositivo dove carichi i file.</li>
+      </ol>
+      <button type="button" id="backupOn" class="primary"></button>
+      <div id="backupRelinkWrap" class="field" hidden>
+        <span class="field-label">Scarica i file da Drive e sceglili qui: l'app li rimette al loro posto.</span>
+        <label class="chip file-pick">📂 Ricollega i file
+          <input id="backupRelink" type="file" multiple hidden>
+        </label>
+      </div>
+      <button type="button" id="backupOff" class="danger" hidden>Disattiva su questo dispositivo</button>
     </div>
   </div>
 
@@ -172,7 +222,7 @@
         <span></span><strong>Google Calendar</strong>
         <button type="button" class="link-btn" data-close>Chiudi</button>
       </div>
-      <p class="muted small">Si fa una volta sola ed è più comodo dal PC. Serve un piccolo script sul tuo account Google, che legge il calendario e lo passa all'app.</p>
+      <p class="muted small">Si fa una volta sola ed è più comodo dal PC. Serve un piccolo script sul tuo account Google, che legge il calendario e lo passa all'app e, se attivi il backup, salva le copie dei documenti sul tuo Drive.</p>
       <ol class="cal-steps">
         <li>Copia il codice, apri <a href="https://script.new" target="_blank" rel="noopener">script.new</a> con il tuo account, cancella quello che c'è e incollalo.
           <textarea id="calCode" class="cal-code" rows="4" readonly aria-label="Codice dello script"></textarea>
@@ -184,7 +234,7 @@
           <input id="calUrl" type="url" placeholder="https://script.google.com/…/exec" autocomplete="off" aria-label="URL dell'app web">
         </li>
       </ol>
-      <p class="muted small">L'URL dà accesso in lettura ai tuoi appuntamenti: non condividerlo con nessuno. Resta salvato solo su questo dispositivo, quindi su telefono e PC va incollato separatamente.</p>
+      <p class="muted small">L'URL dà accesso in lettura ai tuoi appuntamenti e permette di aggiungere file alla cartella di backup: non condividerlo con nessuno. Resta salvato solo su questo dispositivo, quindi su telefono e PC va incollato separatamente.</p>
       <button type="button" id="calSave" class="primary">Collega</button>
       <button type="button" id="calForget" class="danger" hidden>Scollega da questo dispositivo</button>
     </div>

@@ -18,6 +18,8 @@
   --c-luoghi: #2c6e55;
   --c-attivita: #9a6300;
   --c-regali: #a83e6b;
+  --c-documenti: #2a6f86;
+  --c-password: #4b5563;
   --c-note: #5a5570;
 }
 @media (prefers-color-scheme: dark) {
@@ -41,6 +43,8 @@
     --c-luoghi: #7bcbab;
     --c-attivita: #e3b257;
     --c-regali: #ec9bbd;
+    --c-documenti: #8ccbe0;
+    --c-password: #b6bdc9;
     --c-note: #b9b4d4;
   }
 }
@@ -53,6 +57,7 @@ body[data-col="film"] { --accent: var(--c-film); }
 body[data-col="luoghi"] { --accent: var(--c-luoghi); }
 body[data-col="attivita"] { --accent: var(--c-attivita); }
 body[data-col="regali"] { --accent: var(--c-regali); }
+body[data-col="documenti"] { --accent: var(--c-documenti); }
 body[data-col="note"] { --accent: var(--c-note); }
 .tile[data-go="ristoranti"], .picker-list [data-pick="ristoranti"] { --tile: var(--c-ristoranti); }
 .tile[data-go="vini"], .picker-list [data-pick="vini"] { --tile: var(--c-vini); }
@@ -60,6 +65,8 @@ body[data-col="note"] { --accent: var(--c-note); }
 .tile[data-go="luoghi"], .picker-list [data-pick="luoghi"] { --tile: var(--c-luoghi); }
 .tile[data-go="attivita"], .picker-list [data-pick="attivita"] { --tile: var(--c-attivita); }
 .tile[data-go="regali"], .picker-list [data-pick="regali"] { --tile: var(--c-regali); }
+.tile[data-go="documenti"], .picker-list [data-pick="documenti"] { --tile: var(--c-documenti); }
+.tile[data-go="password"] { --tile: var(--c-password); }
 .tile[data-go="note"], .picker-list [data-pick="note"] { --tile: var(--c-note); }
 
 * { box-sizing: border-box; }
@@ -300,3 +307,9 @@ mark:not(.hl) { background: #f5b971; color: #24201a; border-radius: 3px; }
 .cat-list { display: grid; gap: 6px; }
 .cat-row { display: flex; align-items: center; gap: 4px; }
 .cat-row input { flex: 1; min-width: 0; }
+
+/* Documentazione */
+button.pin { background: none; border: 0; padding: 0; }
+.file-pick { display: flex; align-items: center; gap: 6px; min-height: 46px; padding: 9px 14px; font-size: 15px; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.file-img { display: block; width: 100%; max-height: 60vh; object-fit: contain; border-radius: 10px; background: var(--bg); }
+.file-action { display: block; text-align: center; text-decoration: none; }

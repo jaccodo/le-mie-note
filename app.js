@@ -36,6 +36,11 @@ const COLLECTIONS = [
     place: { label: 'Per chi', hint: 'es. Mamma, Luca', filter: true, suggest: true, icon: '👤' },
     link: { label: 'Link', hint: 'Incolla il link (facoltativo)' },
     tagPresets: ['Compleanno', 'Natale', 'Anniversario', 'Laurea'] },
+  { id: 'documenti', label: 'Documentazione', add: 'Nuovo documento', icon: '📁', titleHint: 'Nome del documento',
+    todo: 'Salvati', noStatus: true, files: true,
+    extra: { label: 'Data del documento', hint: 'es. marzo 2026' },
+    tagPresets: ['Referto', 'Analisi', 'Bolletta', 'Contratto', 'Ricevuta', 'Garanzia', 'Assicurazione', 'Tasse'] },
+  { id: 'password', label: 'Password', icon: '🔐', external: true, externalLabel: 'Apri Bitwarden' },
   { id: 'note', label: 'Note', add: 'Nuova nota', icon: '📝', titleHint: 'Titolo',
     todo: 'Da fare', done: 'Completate' },
 ];
@@ -201,7 +206,7 @@ function go(col, keepFilters) {
   render();
   window.scrollTo(0, 0);
 }
-const SHEETS = ['sheet', 'menu', 'picker', 'calSheet', 'catSheet'];
+const SHEETS = ['sheet', 'menu', 'picker', 'calSheet', 'catSheet', 'fileSheet', 'backupSheet'];
 function hideSheets() {
   SHEETS.forEach(id => { $(id).hidden = true; });
   editing = null;
@@ -217,7 +222,7 @@ function closeSheet() {
 }
 function colFromHash() {
   const id = decodeURIComponent(location.hash.slice(1));
-  return colById(id) ? id : null;
+  return colById(id) && !colById(id).external ? id : null;
 }
 window.addEventListener('popstate', () => {
   hideSheets();
@@ -231,7 +236,7 @@ document.addEventListener('click', e => {
 
 // ===== Filtri e ordinamento =====
 function searchable(n) {
-  return [n.title, n.body, n.maker, n.place, n.extra, n.link, n.kind, ...(n.tags || []).map(t => '#' + t)].filter(Boolean).join(' ').toLowerCase();
+  return [n.title, n.body, n.maker, n.place, n.extra, n.link, n.fileName, n.kind, ...(n.tags || []).map(t => '#' + t)].filter(Boolean).join(' ').toLowerCase();
 }
 function matches(n) {
   if (ui.col && colOf(n) !== ui.col) return false;
@@ -258,7 +263,7 @@ function sorted(list) {
 function render() {
   const col = colById(ui.col);
   document.body.dataset.col = ui.col || '';
-  $('heading').textContent = col ? col.label : 'Le mie cose';
+  $('heading').textContent = col ? col.label : 'Jaccodo 🧠';
   $('backBtn').hidden = !col;
   $('search').placeholder = col ? `Cerca in ${col.label.toLowerCase()}…` : 'Cerca in tutto…';
 
@@ -306,9 +311,11 @@ function card(n, words, showCol) {
           showCol ? `<span class="badge">${c.icon} ${esc(c.label)}</span>` : '',
           !ui.cat && cat ? `<span class="badge">${esc(cat.label)}</span>` : '',
           prio ? `<span class="badge" style="color:var(--${prio.id})">● ${prio.label}</span>` : '',
+          n.fileId ? fileBadge(n) : '',
           ...(n.tags || []).map(t => `<span class="badge tag">${c.tagPresets ? '' : '#'}${esc(t)}</span>`),
         ].join('')}</div>
       </div>
+      ${n.fileId ? `<button class="pin" data-act="open" aria-label="Apri il file">📄</button>` : ''}
       ${n.link ? `<a class="pin" href="${esc(n.link)}" target="_blank" rel="noopener" aria-label="Apri il link">🔗</a>` : ''}
       ${mapUrl ? `<a class="pin" href="${esc(mapUrl)}" target="_blank" rel="noopener" aria-label="Apri in Maps">📍</a>` : ''}
     </li>`;
@@ -328,7 +335,7 @@ function renderTiles() {
     const list = inCol(c.id);
     const done = list.filter(n => n.done).length;
     const open = list.length - done;
-    const count = !list.length ? 'Ancora vuoto' : c.noStatus ? `${c.todo} ${open}` : `${c.todo} ${open} · ${c.done} ${done}`;
+    const count = c.externalLabel ? c.externalLabel : !list.length ? 'Ancora vuoto' : c.noStatus ? `${c.todo} ${open}` : `${c.todo} ${open} · ${c.done} ${done}`;
     return `<button class="tile" data-go="${c.id}">
       <span class="tile-icon">${c.icon}</span>
       <span class="tile-name">${esc(c.label)}</span>
@@ -375,6 +382,11 @@ function renderHint(col, home) {
   const hasWork = catDoc.list.some(c => c.id === 'lavoro');
   hint.hidden = !hasWork || !((home && isWorkDay) || (col && col.id === 'note' && ui.cat === 'lavoro'));
   if (!hint.hidden) hint.textContent = `📅 ${nextWorkDayLabel()} · ${pending} da fare`;
+  if (col && col.id === 'documenti') {
+    const text = backupHint();
+    hint.hidden = !text;
+    hint.textContent = text;
+  }
 }
 function nextWorkDayLabel() {
   const today = new Date();
@@ -410,6 +422,10 @@ function openEditor(colId, note) {
   $('fNewTag').value = '';
   $('fMaker').value = note ? note.maker || '' : '';
   $('fExtra').value = note ? note.extra || '' : '';
+  $('fFileWrap').hidden = !col.files;
+  form.file = null;
+  $('fFile').value = '';
+  $('fFileName').textContent = note && note.fileName ? note.fileName + ' (tocca per sostituirlo)' : 'Scegli un file o fai una foto';
   $('fLink').value = note ? note.link || '' : '';
   $('fTags').value = note ? (note.tags || []).join(' ') : (ui.tag || '');
   $('deleteBtn').hidden = !note;
@@ -608,7 +624,7 @@ $('fBody').oninput = () => {
   bodyChanged();
 };
 
-$('editor').onsubmit = e => {
+$('editor').onsubmit = async e => {
   e.preventDefault();
   const title = $('fTitle').value.trim();
   if (!title) { $('fTitle').focus(); return toast('Scrivi almeno il nome'); }
@@ -616,6 +632,19 @@ $('editor').onsubmit = e => {
   const rawLink = $('fLinkWrap').hidden ? '' : $('fLink').value.trim();
   const link = rawLink ? linkUrl(rawLink) : '';
   if (rawLink && !link) { $('fLink').focus(); return toast('Il link non sembra valido'); }
+  const needsFile = colById(form.col).files && !form.file && !(editing && editing.fileId);
+  if (needsFile) return toast('Scegli il file da salvare');
+  let fileData = null;
+  if (form.file) {
+    const file = form.file;
+    form.file = null; // Un secondo tocco su Salva non deve salvare il file due volte.
+    try {
+      fileData = await storeFile(file);
+    } catch {
+      form.file = file;
+      return toast('Non riesco a salvare il file su questo dispositivo');
+    }
+  }
   addNewTag(); // Un tag scritto ma non ancora aggiunto non deve andare perso.
   const data = {
     col: form.col,
@@ -625,6 +654,7 @@ $('editor').onsubmit = e => {
     place: $('fPlaceWrap').hidden ? '' : $('fPlace').value.trim(),
     extra: $('fExtraWrap').hidden ? '' : $('fExtra').value.trim(),
     link,
+    ...fileData,
     kind: form.kind,
     rating: form.done && !isNote ? form.rating : 0,
     done: form.done,
@@ -639,6 +669,7 @@ $('editor').onsubmit = e => {
   closeSheet();
   ui.tab = ui.col === note.col ? (note.done ? 'done' : 'todo') : ui.tab;
   changed(note);
+  if (fileData) runBackup();
 };
 $('deleteBtn').onclick = () => {
   const removed = byId(editing.id) || editing;
@@ -651,7 +682,7 @@ $('deleteBtn').onclick = () => {
 // ===== Eventi principali =====
 $('addBtn').onclick = () => {
   if (ui.col) return openEditor(ui.col);
-  $('pickerList').innerHTML = orderedCollections().map(c =>
+  $('pickerList').innerHTML = orderedCollections().filter(c => !c.external).map(c =>
     `<button data-pick="${c.id}"><span class="tile-icon">${c.icon}</span>${esc(c.add.replace(/^Nuov[oa] /, '').replace(/^./, m => m.toUpperCase()))}</button>`).join('');
   showSheet('picker');
 };
@@ -664,9 +695,19 @@ $('backBtn').onclick = () => {
   else go(null);
 };
 $('search').oninput = e => { ui.q = e.target.value.trim(); render(); };
+// Le password restano in Bitwarden: su Android provo ad aprire la sua app, altrimenti il sito.
+function openPasswords() {
+  if (/android/i.test(navigator.userAgent)) {
+    location.href = 'intent://#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.x8bit.bitwarden;S.browser_fallback_url=' + encodeURIComponent('https://vault.bitwarden.com') + ';end';
+  } else {
+    window.open('https://vault.bitwarden.com', '_blank', 'noopener');
+  }
+}
 $('tiles').onclick = e => {
   if (tileDrag.justEnded) return;
-  const b = e.target.closest('[data-go]'); if (b) go(b.dataset.go);
+  const b = e.target.closest('[data-go]'); if (!b) return;
+  if (colById(b.dataset.go).external) return openPasswords();
+  go(b.dataset.go);
 };
 
 // Riordino: tieni premuto un riquadro finché si solleva, poi trascinalo.
@@ -713,6 +754,7 @@ function endTileDrag() {
 document.addEventListener('pointerup', endTileDrag);
 document.addEventListener('pointercancel', endTileDrag);
 $('hint').onclick = () => {
+  if (ui.col === 'documenti') return openBackupSheet();
   if (ui.col === 'note') return;
   resetFilters(); ui.cat = 'lavoro'; go('note', true);
 };
@@ -753,6 +795,8 @@ $('list').onclick = e => {
     lines[i] = lines[i].replace(/^- \[( |x)\]/i, (m, x) => x === ' ' ? '- [x]' : '- [ ]');
     note.body = lines.join('\n');
     changed(note);
+  } else if (act === 'open') {
+    openFile(note);
   } else if (act === 'edit') {
     openEditor(colOf(note), note);
   }
@@ -760,7 +804,7 @@ $('list').onclick = e => {
 
 // ===== Menu: backup =====
 $('menuBtn').onclick = () => {
-  $('stats').textContent = COLLECTIONS.map(c => `${c.label}: ${inCol(c.id).length}`).join(' · ');
+  $('stats').textContent = COLLECTIONS.filter(c => !c.external).map(c => `${c.label}: ${inCol(c.id).length}`).join(' · ');
   showSheet('menu');
 };
 $('reorderBtn').onclick = () => {
@@ -772,7 +816,7 @@ $('exportBtn').onclick = () => {
   const blob = new Blob([JSON.stringify([...notes, { id: CAT_DOC, ...catDoc }], null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `le-mie-cose-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `jaccodo-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 };
@@ -884,6 +928,20 @@ const CAL_SCRIPT = `function doGet() {
     });
   });
   return ContentService.createTextOutput(JSON.stringify({ events: events }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+function doPost(e) {
+  var data = JSON.parse(e.postData.contents);
+  var found = DriveApp.getFoldersByName('Jaccodo backup');
+  var folder = found.hasNext() ? found.next() : DriveApp.createFolder('Jaccodo backup');
+  var same = data.name ? folder.getFilesByName(data.name) : null;
+  if (data.kind === 'dati') {
+    if (same.hasNext()) same.next().setContent(data.text);
+    else folder.createFile(data.name, data.text, 'application/json');
+  } else if (data.kind === 'file' && !same.hasNext()) {
+    folder.createFile(Utilities.newBlob(Utilities.base64Decode(data.base64), data.type, data.name));
+  }
+  return ContentService.createTextOutput(JSON.stringify({ ok: true }))
     .setMimeType(ContentService.MimeType.JSON);
 }`;
 const agenda = { events: [], updated: 0, loading: false, error: false, showAll: false };
@@ -1022,11 +1080,235 @@ document.addEventListener('visibilitychange', () => {
   loadAgenda();
 });
 
+// ===== Documentazione: file sul dispositivo =====
+// I file restano nel browser (IndexedDB); nelle note vanno solo titolo, tag e nome del file.
+const FILE_DB = 'jaccodo-file';
+const FILE_STORE = 'files';
+const localFiles = new Set();
+function fileStore(mode, action) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(FILE_DB, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore(FILE_STORE);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction(FILE_STORE, mode);
+      const req = action(tx.objectStore(FILE_STORE));
+      tx.oncomplete = () => { db.close(); resolve(req.result); };
+      tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
+    };
+  });
+}
+const putFile = (id, file) => fileStore('readwrite', s => s.put(file, id));
+const getFile = id => fileStore('readonly', s => s.get(id));
+const deleteFile = id => fileStore('readwrite', s => s.delete(id));
+const allFileIds = () => fileStore('readonly', s => s.getAllKeys());
+const docNotes = () => inCol('documenti');
+
+async function storeFile(file) {
+  const fileId = uid();
+  await putFile(fileId, file);
+  localFiles.add(fileId);
+  // Chiedo al browser di non cancellare i file quando serve spazio.
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  const dot = file.name.lastIndexOf('.');
+  const base = dot > 0 ? file.name.slice(0, dot) : file.name;
+  const ext = dot > 0 ? file.name.slice(dot) : '';
+  return {
+    fileId, fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: file.size,
+    backupName: `${base} (${fileId.slice(-4)})${ext}`, backedUp: false,
+  };
+}
+function fileBadge(n) {
+  if (!localFiles.has(n.fileId)) return '<span class="badge">📵 File non su questo dispositivo</span>';
+  if (n.backedUp) return '<span class="badge">☁️ Copia su Drive</span>';
+  return backup.on ? '<span class="badge">⏳ Copia in attesa</span>' : '';
+}
+$('fFile').onchange = e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  form.file = file;
+  $('fFileName').textContent = file.name;
+  if (!$('fTitle').value.trim()) $('fTitle').value = file.name.replace(/\.[^.]+$/, '');
+};
+
+// Apertura di un file
+let fileUrl = null;
+async function openFile(n) {
+  if (!localFiles.has(n.fileId)) return toast('Il file è sul dispositivo dove l\'hai caricato');
+  const file = await getFile(n.fileId).catch(() => null);
+  if (!file) return toast('Non riesco ad aprire il file');
+  if (fileUrl) URL.revokeObjectURL(fileUrl);
+  fileUrl = URL.createObjectURL(file);
+  const isImage = (n.fileType || '').startsWith('image/');
+  $('fileTitle').textContent = n.title;
+  $('fileInfo').textContent = n.fileName;
+  $('fileImg').hidden = !isImage;
+  if (isImage) $('fileImg').src = fileUrl; else $('fileImg').removeAttribute('src');
+  $('fileDownload').href = fileUrl;
+  $('fileDownload').download = n.fileName;
+  const shareable = new File([file], n.fileName, { type: n.fileType });
+  const canShare = !!(navigator.canShare && navigator.canShare({ files: [shareable] }));
+  $('fileShare').hidden = !canShare;
+  $('fileShare').onclick = () => navigator.share({ files: [shareable], title: n.title }).catch(() => {});
+  showSheet('fileSheet');
+}
+
+// ===== Backup automatico su Drive =====
+// Usa lo stesso script del calendario: i file finiscono nella cartella "Jaccodo backup" del tuo Drive.
+const BACKUP_KEY = 'jaccodo-backup';
+const BACKUP_MAX = 25 * 1024 * 1024; // Oltre questa misura lo script di Google non riceve il file.
+const DATA_EVERY = 24 * 60 * 60 * 1000;
+const backup = { on: false, last: 0, dataAt: 0, running: false, error: false };
+try { Object.assign(backup, JSON.parse(localStorage.getItem(BACKUP_KEY)) || {}); } catch {}
+function saveBackupState() {
+  localStorage.setItem(BACKUP_KEY, JSON.stringify({ on: backup.on, last: backup.last, dataAt: backup.dataAt }));
+}
+const toBackup = () => docNotes().filter(n => n.fileId && !n.backedUp && localFiles.has(n.fileId));
+const tooBig = n => n.fileSize > BACKUP_MAX;
+async function postBackup(payload) {
+  const res = await fetch(calUrl(), { method: 'POST', body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (!data.ok) throw new Error('Risposta non valida');
+}
+const toBase64 = file => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result.split(',')[1] || '');
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(file);
+});
+async function runBackup() {
+  if (!backup.on || !calUrl() || backup.running || !navigator.onLine) return;
+  backup.running = true;
+  let sent = 0;
+  try {
+    for (const { id } of toBackup().filter(n => !tooBig(n))) {
+      const n = byId(id);
+      if (!n) continue;
+      const { fileId } = n;
+      const file = await getFile(fileId);
+      await postBackup({ kind: 'file', name: n.backupName, type: n.fileType, base64: await toBase64(file) });
+      const current = byId(id);
+      if (current && current.fileId === fileId) { current.backedUp = true; changed(current); }
+      sent++;
+    }
+    // Una copia di titoli, tag e appunti: serve per ricostruire tutto su un telefono nuovo.
+    if (sent || Date.now() - backup.dataAt > DATA_EVERY) {
+      await postBackup({ kind: 'dati', name: 'Jaccodo-dati.json', text: JSON.stringify([...notes, { id: CAT_DOC, ...catDoc }], null, 2) });
+      backup.dataAt = Date.now();
+    }
+    backup.last = Date.now();
+    backup.error = false;
+  } catch {
+    backup.error = true;
+  }
+  backup.running = false;
+  saveBackupState();
+  render();
+  if (!$('backupSheet').hidden) renderBackupStatus();
+}
+function backupHint() {
+  if (!docNotes().length) return '';
+  if (!backup.on) return '☁️ Attiva il backup automatico su Drive';
+  if (backup.error) return `⚠️ Backup non riuscito: ${toBackup().length} file in attesa. Tocca per controllare`;
+  return '';
+}
+function renderBackupStatus() {
+  const waiting = toBackup();
+  const big = waiting.filter(tooBig).length;
+  const missing = docNotes().filter(n => n.fileId && !localFiles.has(n.fileId)).length;
+  const lines = [
+    !backup.on ? 'Backup non attivo su questo dispositivo.'
+      : backup.error ? 'L\'ultimo backup non è riuscito: riproverò da solo.'
+      : backup.last ? `Attivo. Ultimo controllo: ${dayLabel(startOfDay(backup.last)).toLowerCase()} alle ${clock(backup.last)}.` : 'Attivo.',
+    backup.on && waiting.length ? `File in attesa: ${waiting.length}.` : '',
+    big ? `${big} file superano i 25 MB e non vengono copiati.` : '',
+    missing ? `File non presenti su questo dispositivo: ${missing}.` : '',
+  ];
+  $('backupStatus').textContent = lines.filter(Boolean).join(' ');
+  $('backupCode').value = CAL_SCRIPT;
+  $('backupOn').textContent = backup.on ? 'Riprova adesso' : 'Attiva il backup';
+  $('backupOff').hidden = !backup.on;
+  $('backupRelinkWrap').hidden = !missing;
+}
+function openBackupSheet() {
+  renderBackupStatus();
+  showSheet('backupSheet');
+}
+$('backupBtn').onclick = openBackupSheet;
+$('backupCopy').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(CAL_SCRIPT);
+    toast('Codice copiato');
+  } catch {
+    $('backupCode').select();
+    toast('Tieni premuto sul testo e copialo');
+  }
+};
+$('backupOn').onclick = async () => {
+  if (!calUrl()) { toast('Prima collega Google Calendar'); return openCalSheet(); }
+  $('backupOn').disabled = true;
+  try {
+    await postBackup({ kind: 'ping' });
+    backup.on = true;
+    backup.error = false;
+    saveBackupState();
+    toast('Backup attivo');
+    await runBackup();
+  } catch {
+    toast('Non funziona ancora: aggiorna lo script e crea una nuova versione');
+  }
+  $('backupOn').disabled = false;
+  render();
+  renderBackupStatus();
+};
+$('backupOff').onclick = () => {
+  backup.on = false;
+  backup.error = false;
+  saveBackupState();
+  render();
+  renderBackupStatus();
+};
+// Su un dispositivo nuovo: scarichi i file dal Drive e l'app li rimette al loro posto.
+$('backupRelink').onchange = async e => {
+  let linked = 0;
+  for (const file of e.target.files) {
+    const n = docNotes().find(x => x.fileId && !localFiles.has(x.fileId) && (x.backupName === file.name || x.fileName === file.name));
+    if (!n) continue;
+    try {
+      await putFile(n.fileId, file);
+      localFiles.add(n.fileId);
+      linked++;
+    } catch {}
+  }
+  e.target.value = '';
+  toast(`File ricollegati: ${linked}`);
+  render();
+  renderBackupStatus();
+};
+window.addEventListener('online', runBackup);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') runBackup();
+});
+async function initFiles() {
+  try {
+    const ids = await allFileIds();
+    ids.forEach(id => localFiles.add(id));
+    // I file dei documenti eliminati si cancellano qui: fino ad ora "Annulla" poteva recuperarli.
+    // Se non vedo nessun documento non tocco niente, per non perdere file per un errore di lettura.
+    const used = new Set(docNotes().map(n => n.fileId));
+    if (used.size) await Promise.all(ids.filter(id => !used.has(id)).map(id => { localFiles.delete(id); return deleteFile(id); }));
+  } catch {}
+  render();
+  runBackup();
+}
+
 // ===== Avvio =====
 if (history.state && history.state.sheet) history.replaceState({ inApp: history.state.inApp }, '');
 ui.col = colFromHash();
 render();
 loadAgenda();
+initFiles();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
