@@ -943,6 +943,10 @@ function doPost(e) {
   }
   return ContentService.createTextOutput(JSON.stringify({ ok: true }))
     .setMimeType(ContentService.MimeType.JSON);
+}
+// Da eseguire una volta nell'editor: fa chiedere a Google il permesso di creare file su Drive.
+function autorizzaDrive() {
+  if (!DriveApp.getFoldersByName('Jaccodo backup').hasNext()) DriveApp.createFolder('Jaccodo backup');
 }`;
 const agenda = { events: [], updated: 0, loading: false, error: false, showAll: false };
 try { Object.assign(agenda, JSON.parse(localStorage.getItem(CAL_CACHE_KEY)) || {}); } catch {}
