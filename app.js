@@ -41,6 +41,8 @@ const COLLECTIONS = [
     extra: { label: 'Data del documento', hint: 'es. marzo 2026' },
     tagPresets: ['Referto', 'Analisi', 'Bolletta', 'Contratto', 'Ricevuta', 'Garanzia', 'Assicurazione', 'Tasse'] },
   { id: 'password', label: 'Password', icon: '🔐', external: true, externalLabel: 'Apri Bitwarden' },
+  { id: 'appunti', label: 'Appunti', add: 'Nuovo appunto', icon: '🗒️', titleHint: 'Titolo dell\'appunto',
+    todo: 'Salvati', noStatus: true, tagPresets: [] },
   { id: 'note', label: 'Note', add: 'Nuova nota', icon: '📝', titleHint: 'Titolo',
     todo: 'Da fare', done: 'Completate' },
 ];
