@@ -279,9 +279,11 @@ function render() {
 
   const words = ui.q.split(/\s+/).filter(Boolean);
   const shown = home ? [] : sorted(notes.filter(matches));
-  $('list').innerHTML = shown.map(n => card(n, words, !col)).join('');
+  const boxes = !!col && col.id === 'note' && !searching && !ui.cat;
+  $('list').classList.toggle('boxes', boxes);
+  $('list').innerHTML = boxes ? noteBoxes(shown) : shown.map(n => card(n, words, !col)).join('');
 
-  $('empty').hidden = home || shown.length > 0;
+  $('empty').hidden = home || boxes || shown.length > 0;
   const filtering = ui.cat || ui.kind || ui.tag || ui.place;
   $('empty').textContent = searching ? `Nessun risultato per “${ui.q}”.`
     : filtering ? 'Niente con questi filtri.' : 'Ancora niente qui. Tocca + per aggiungere.';
@@ -290,6 +292,33 @@ function render() {
 function ratingHtml(r) {
   if (!r) return '';
   return `<div class="rating" aria-label="Voto ${r} su 5">${'★'.repeat(r)}<span class="off">${'★'.repeat(5 - r)}</span></div>`;
+}
+// Le note divise per categoria: ogni box è già in ordine di priorità.
+const BOX_COLORS = ['film', 'ristoranti', 'luoghi', 'attivita', 'regali', 'documenti', 'vini'];
+function miniCard(n) {
+  const prio = PRIORITIES.find(p => p.id === n.priority);
+  const boxes = (n.body || '').match(/^- \[[ x]\]/gim) || [];
+  const ticked = boxes.filter(b => /x/i.test(b)).length;
+  return `<li class="item mini ${n.done ? 'done' : ''} ${prio ? 'prio-' + prio.id : ''}" data-id="${n.id}" data-col="note">
+    <button class="check" data-act="toggle" aria-label="${n.done ? 'Da fare' : 'Completata'}"></button>
+    <div class="content" data-act="edit">
+      <span class="title">${esc(n.title)}</span>
+      ${boxes.length ? `<span class="progress">${ticked}/${boxes.length}</span>` : ''}
+    </div>
+  </li>`;
+}
+function noteBoxes(shown) {
+  const known = new Set(catDoc.list.map(c => c.id));
+  const groups = [...catDoc.list];
+  if (shown.some(n => !known.has(n.category))) groups.push({ id: '', label: 'Senza categoria' });
+  return groups.map((c, i) => {
+    const inBox = shown.filter(n => c.id ? n.category === c.id : !known.has(n.category));
+    if (!inBox.length && ui.tag) return '';
+    return `<li class="note-box" style="--box:var(--c-${BOX_COLORS[i % BOX_COLORS.length]})">
+      <button class="box-head" ${c.id ? `data-box="${esc(c.id)}"` : ''}><span>${esc(c.label)}</span><span class="count">${inBox.length}</span></button>
+      ${inBox.length ? `<ul>${inBox.map(miniCard).join('')}</ul>` : '<div class="box-empty">Vuoto</div>'}
+    </li>`;
+  }).join('');
 }
 function card(n, words, showCol) {
   const c = colById(colOf(n));
@@ -300,7 +329,7 @@ function card(n, words, showCol) {
     ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([n.maker || n.title, n.place].filter(Boolean).join(' '))
     : null;
   return `
-    <li class="item ${n.done ? 'done' : ''}" data-id="${n.id}" data-col="${c.id}">
+    <li class="item ${n.done ? 'done' : ''} ${prio ? 'prio-' + prio.id : ''}" data-id="${n.id}" data-col="${c.id}">
       ${c.noStatus ? '' : `<button class="check" data-act="toggle" aria-label="${esc(n.done ? c.todo : c.done)}"></button>`}
       <div class="content" data-act="edit">
         <div class="title">${highlight(n.title, words)}</div>
@@ -335,9 +364,9 @@ function renderTiles() {
     const list = inCol(c.id);
     const done = list.filter(n => n.done).length;
     const open = list.length - done;
-    const count = c.externalLabel ? c.externalLabel : !list.length ? 'Ancora vuoto' : c.noStatus ? `${c.todo} ${open}` : `${c.todo} ${open} · ${c.done} ${done}`;
+    const count = c.externalLabel ? c.externalLabel : !list.length ? 'Vuoto' : c.noStatus ? c.todo : `${c.todo} · ${c.done} ${done}`;
     return `<button class="tile" data-go="${c.id}">
-      <span class="tile-icon">${c.icon}</span>
+      <span class="tile-top"><span class="tile-icon">${c.icon}</span>${list.length ? `<span class="tile-num">${open}</span>` : ''}</span>
       <span class="tile-name">${esc(c.label)}</span>
       <span class="tile-count">${esc(count)}</span>
     </button>`;
@@ -361,8 +390,10 @@ function renderChips(col) {
     const tagChips = tags.map(t => `<button class="chip ${ui.tag === t ? 'on' : ''}" data-tag="${esc(t)}">${col.tagPresets ? '' : '#'}${esc(t)}</button>`).join('');
     if (col.kinds) html = col.kinds.map(k => `<button class="chip ${ui.kind === k ? 'on' : ''}" data-kind="${esc(k)}">${esc(k)}</button>`).join('');
     if (ui.cat && !catDoc.list.some(c => c.id === ui.cat)) ui.cat = null;
+    // Con i box le categorie si vedono già: i pulsanti servono solo dentro una categoria.
     if (col.id === 'note') html = '<button class="chip" data-edit-cats="1">✎ Categorie</button>'
-      + catDoc.list.map(c => `<button class="chip ${ui.cat === c.id ? 'on' : ''}" data-cat="${esc(c.id)}">${esc(c.label)}</button>`).join('');
+      + (ui.cat ? `<button class="chip" data-cat="${esc(ui.cat)}">▦ Tutti i box</button>` : '')
+      + (!ui.cat && !ui.q ? [] : catDoc.list).map(c => `<button class="chip ${ui.cat === c.id ? 'on' : ''}" data-cat="${esc(c.id)}">${esc(c.label)}</button>`).join('');
     html += tagChips;
     if (col.place && col.place.filter) {
       const places = usedValues(col.id, 'place');
@@ -773,6 +804,8 @@ $('chips').onclick = $('placeChips').onclick = e => {
   render();
 };
 $('list').onclick = e => {
+  const box = e.target.closest('[data-box]');
+  if (box) { ui.cat = box.dataset.box; render(); window.scrollTo(0, 0); return; }
   const li = e.target.closest('.item'); if (!li) return;
   const id = li.dataset.id;
   const note = byId(id);
