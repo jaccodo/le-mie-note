@@ -297,52 +297,30 @@ function ratingHtml(r) {
   if (!r) return '';
   return `<div class="rating" aria-label="Voto ${r} su 5">${'★'.repeat(r)}<span class="off">${'★'.repeat(5 - r)}</span></div>`;
 }
-// Riassunto di una nota: calcolato sul dispositivo, il testo non esce dal telefono.
-// Una lista diventa le sue voci, un testo lungo la sua frase più significativa.
+// Titoli brevi nelle Note: solo il titolo mostrato si accorcia, il testo resta com'è scritto.
 const SUMMARY_KEY = 'jaccodo-riassunti';
-const SUMMARY_MAX = 90;
 const STOPWORDS = new Set(('il lo la i gli le un uno una di a da in con su per tra fra e ed o ma se che non è sono ho ha hanno del dello della dei degli delle ' +
   'al allo alla ai agli alle dal dallo dalla dai dagli dalle nel nello nella nei negli nelle sul sullo sulla sui sugli sulle come più anche poi quindi perché ' +
   'questo questa questi queste quello quella quelli quelle mi ti si ci vi ne era sia essere fare molto tutto tutti').split(' '));
-// Le parole che di solito indicano il punto della nota.
-const KEY_WORDS = new Set('bisogna devo dobbiamo serve servono ricorda ricordare importante urgente entro scadenza prenotare chiamare pagare comprare inviare mandare portare decidere controllare'.split(' '));
 let summaryOn = localStorage.getItem(SUMMARY_KEY) !== 'off';
-const cleanInline = s => s.replace(/\*\*|==/g, '').trim();
-const wordsOf = s => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter(w => w.length > 2 && !STOPWORDS.has(w));
-function shorten(text) {
-  if (text.length <= SUMMARY_MAX) return text;
-  const cut = text.slice(0, SUMMARY_MAX);
-  return cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : SUMMARY_MAX).replace(/[\s,;:.]+$/, '') + '…';
+function shorten(text, max) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  return cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : max).replace(/[\s,;:.]+$/, '') + '…';
 }
-function noteSummary(n) {
-  const lines = (n.body || '').split('\n').map(l => l.trim()).filter(Boolean);
-  if (!lines.length) return '';
-  const checks = lines.map(l => CHECK_LINE.exec(l)).filter(Boolean);
-  if (checks.length) {
-    const open = checks.filter(m => m[1] === ' ').map(m => cleanInline(m[2])).filter(Boolean);
-    return open.length ? shorten('Da fare: ' + open.join(', ')) : 'Tutto spuntato';
-  }
-  const bullets = lines.map(l => BULLET_LINE.exec(l)).filter(Boolean);
-  if (bullets.length) return shorten(bullets.map(m => cleanInline(m[1])).filter(Boolean).join(', '));
-  const text = cleanInline(lines.join(' '));
-  if (text.toLowerCase() === n.title.trim().toLowerCase()) return '';
-  if (text.length <= SUMMARY_MAX) return text;
-  const sentences = text.match(/[^.!?]+[.!?]*/g).map(s => s.trim()).filter(s => s.length > 8);
-  if (!sentences.length) return shorten(text);
-  const counts = {};
-  wordsOf(text).forEach(w => { counts[w] = (counts[w] || 0) + 1; });
-  const inTitle = new Set(wordsOf(n.title));
-  const score = (s, i) => {
-    const words = wordsOf(s);
-    const weight = words.reduce((sum, w) => sum + counts[w] + (inTitle.has(w) ? 6 : 0) + (KEY_WORDS.has(w) ? 5 : 0), 0);
-    return weight / Math.sqrt(words.length || 1) + (i === 0 ? 1 : 0);
-  };
-  let best = 0;
-  sentences.forEach((s, i) => { if (score(s, i) > score(sentences[best], best)) best = i; });
-  return shorten(sentences[best]);
+// Un titolo lungo si accorcia togliendo le parole di legame; "non" e "se" restano perché cambiano il senso.
+const TITLE_MAX = 45;
+function shortTitle(title) {
+  if (!summaryOn || title.length <= TITLE_MAX) return title;
+  const kept = title.trim().split(/\s+/).map(w => w.replace(/^(?:dell|dall|nell|sull|all|l|d|un)['’]/i, '')).filter(w => {
+    const bare = w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    return bare === 'non' || bare === 'se' || !STOPWORDS.has(bare);
+  });
+  const short = shorten(kept.join(' ').replace(/[,;:]+$/, ''), 60);
+  return short.charAt(0).toUpperCase() + short.slice(1);
 }
 function renderSummaryBtn() {
-  $('summaryBtn').textContent = `🧠 Riassunto nelle Note: ${summaryOn ? 'attivo' : 'disattivo'}`;
+  $('summaryBtn').textContent = `✂️ Titoli brevi nelle Note: ${summaryOn ? 'attivo' : 'disattivo'}`;
 }
 
 // Le note divise per categoria: ogni box è già in ordine di priorità.
@@ -351,15 +329,13 @@ function miniCard(n) {
   const prio = PRIORITIES.find(p => p.id === n.priority);
   const boxes = (n.body || '').match(/^- \[[ x]\]/gim) || [];
   const ticked = boxes.filter(b => /x/i.test(b)).length;
-  const summary = summaryOn ? noteSummary(n) : '';
   return `<li class="item mini ${n.done ? 'done' : ''} ${prio ? 'prio-' + prio.id : ''}" data-id="${n.id}" data-col="note">
     <button class="check" data-act="toggle" aria-label="${n.done ? 'Da fare' : 'Completata'}"></button>
     <div class="content" data-act="edit">
       <div class="mini-top">
-        <span class="title">${esc(n.title)}</span>
+        <span class="title">${esc(shortTitle(n.title))}</span>
         ${boxes.length ? `<span class="progress">${ticked}/${boxes.length}</span>` : ''}
       </div>
-      ${summary ? `<div class="summary">${esc(summary)}</div>` : ''}
     </div>
   </li>`;
 }
@@ -388,12 +364,10 @@ function card(n, words, showCol) {
     <li class="item ${n.done ? 'done' : ''} ${prio ? 'prio-' + prio.id : ''}" data-id="${n.id}" data-col="${c.id}">
       ${c.noStatus ? '' : `<button class="check" data-act="toggle" aria-label="${esc(n.done ? c.todo : c.done)}"></button>`}
       <div class="content" data-act="edit">
-        <div class="title">${highlight(n.title, words)}</div>
+        <div class="title">${highlight(c.id === 'note' && !words.length ? shortTitle(n.title) : n.title, words)}</div>
         ${sub ? `<div class="sub">${highlight(sub, words)}</div>` : ''}
         ${ratingHtml(n.rating)}
-        ${n.body && c.id === 'note' && summaryOn && !words.length && !hasList(n.body)
-          ? `<div class="summary">${esc(noteSummary(n))}</div>`
-          : n.body ? `<div class="body ${hasList(n.body) ? 'full' : ''}">${formatBody(n.body, words, true)}</div>` : ''}
+        ${n.body ? `<div class="body ${hasList(n.body) || c.id === 'note' ? 'full' : ''}">${formatBody(n.body, words, true)}</div>` : ''}
         <div class="meta">${[
           showCol ? `<span class="badge">${c.icon} ${esc(c.label)}</span>` : '',
           !ui.cat && cat ? `<span class="badge">${esc(cat.label)}</span>` : '',
