@@ -42,7 +42,8 @@ const COLLECTIONS = [
     tagPresets: ['Referto', 'Analisi', 'Bolletta', 'Contratto', 'Ricevuta', 'Garanzia', 'Assicurazione', 'Tasse'] },
   { id: 'password', label: 'Password', icon: '🔐', external: true, externalLabel: 'Apri Bitwarden' },
   { id: 'appunti', label: 'Appunti', add: 'Nuovo appunto', icon: '🗒️', titleHint: 'Titolo dell\'appunto',
-    todo: 'Salvati', noStatus: true, tagPresets: [] },
+    todo: 'Salvati', noStatus: true, files: true, fileOptional: true, tagPresets: [],
+    link: { label: 'Link', hint: 'Incolla il link (facoltativo)' } },
   { id: 'note', label: 'Note', add: 'Nuova nota', icon: '📝', titleHint: 'Titolo',
     todo: 'Da fare', done: 'Completate' },
 ];
@@ -695,7 +696,7 @@ $('editor').onsubmit = async e => {
   const rawLink = $('fLinkWrap').hidden ? '' : $('fLink').value.trim();
   const link = rawLink ? linkUrl(rawLink) : '';
   if (rawLink && !link) { $('fLink').focus(); return toast('Il link non sembra valido'); }
-  const needsFile = colById(form.col).files && !form.file && !(editing && editing.fileId);
+  const needsFile = colById(form.col).files && !colById(form.col).fileOptional && !form.file && !(editing && editing.fileId);
   if (needsFile) return toast('Scegli il file da salvare');
   let fileData = null;
   if (form.file) {
@@ -893,13 +894,25 @@ $('importInput').onchange = async e => {
     if (!Array.isArray(data)) throw new Error();
     const cats = data.find(n => n && n.id === CAT_DOC);
     if (cats && cats.updated > catDoc.updated) window.noteApp.setCategories(cats);
+    const imported = [];
+    let skipped = 0;
+    for (const { fileBase64, importOnce, ...item } of data.filter(n => n && n.id && n.title)) {
+      // Le note portate da altre app entrano una volta sola e non sovrascrivono quelle già scritte.
+      if (importOnce && (byId(item.id) || notes.some(n => colOf(n) === item.col && sameText(n.title, item.title)))) { skipped++; continue; }
+      const n = { tags: [], body: '', ...item };
+      if (fileBase64) {
+        const bytes = Uint8Array.from(atob(fileBase64), c => c.charCodeAt(0));
+        Object.assign(n, await storeFile(new File([bytes], item.fileName, { type: item.fileType })));
+      }
+      imported.push(n);
+    }
     const merged = new Map(notes.map(n => [n.id, n]));
-    const imported = data.filter(n => n.id && n.title).map(n => ({ tags: [], body: '', ...n }));
     imported.forEach(n => merged.set(n.id, n));
     notes = [...merged.values()];
     save(); closeSheet(); render();
     imported.forEach(n => sync.push(n));
-    toast(`Importati ${imported.length} elementi`);
+    toast(`Importati ${imported.length} elementi` + (skipped ? ` · ${skipped} già presenti` : ''));
+    runBackup();
   } catch {
     toast('File non valido');
   }
@@ -1173,7 +1186,7 @@ const putFile = (id, file) => fileStore('readwrite', s => s.put(file, id));
 const getFile = id => fileStore('readonly', s => s.get(id));
 const deleteFile = id => fileStore('readwrite', s => s.delete(id));
 const allFileIds = () => fileStore('readonly', s => s.getAllKeys());
-const docNotes = () => inCol('documenti');
+const docNotes = () => notes.filter(n => n.fileId);
 
 async function storeFile(file) {
   const fileId = uid();
