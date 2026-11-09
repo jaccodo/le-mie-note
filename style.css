@@ -282,6 +282,12 @@ mark:not(.hl) { background: #f5b971; color: #24201a; border-radius: 3px; }
   border-radius: 10px; background: var(--bg); resize: vertical;
 }
 #fTitle { font-weight: 600; font-size: 15px; }
+.view-content { flex: 1; min-height: 42dvh; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+.view-title { margin: 0; font-size: 16px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.view-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.view-actions a { text-decoration: none; }
+.view-text { font-size: 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.view-hint { margin: auto 0 0; padding-top: 10px; text-align: center; }
 .field, .field-group { display: flex; flex-direction: column; gap: 5px; }
 .field-group { gap: 12px; }
 .field-label { font-size: 11.5px; color: var(--muted); }

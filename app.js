@@ -209,7 +209,7 @@ function go(col, keepFilters) {
   render();
   window.scrollTo(0, 0);
 }
-const SHEETS = ['sheet', 'menu', 'picker', 'calSheet', 'catSheet', 'fileSheet', 'backupSheet'];
+const SHEETS = ['sheet', 'menu', 'picker', 'calSheet', 'catSheet', 'fileSheet', 'backupSheet', 'viewSheet'];
 function hideSheets() {
   SHEETS.forEach(id => { $(id).hidden = true; });
   editing = null;
@@ -353,14 +353,23 @@ function noteBoxes(shown) {
     </li>`;
   }).join('');
 }
+function mapUrl(n, c) {
+  return c.maps && c.maps(n)
+    ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([n.maker || n.title, n.place].filter(Boolean).join(' '))
+    : null;
+}
+function toggleCheckLine(note, i) {
+  const lines = note.body.split('\n');
+  lines[i] = lines[i].replace(/^- \[( |x)\]/i, (m, x) => x === ' ' ? '- [x]' : '- [ ]');
+  note.body = lines.join('\n');
+  changed(note);
+}
 function card(n, words, showCol) {
   const c = colById(colOf(n));
   const cat = catDoc.list.find(x => x.id === n.category);
   const prio = PRIORITIES.find(p => p.id === n.priority);
   const sub = [n.kind, n.maker, n.place, n.extra].filter(Boolean).join(' · ');
-  const mapUrl = c.maps && c.maps(n)
-    ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent([n.maker || n.title, n.place].filter(Boolean).join(' '))
-    : null;
+  const map = mapUrl(n, c);
   return `
     <li class="item ${n.done ? 'done' : ''} ${prio ? 'prio-' + prio.id : ''}" data-id="${n.id}" data-col="${c.id}">
       ${c.noStatus ? '' : `<button class="check" data-act="toggle" aria-label="${esc(n.done ? c.todo : c.done)}"></button>`}
@@ -379,7 +388,7 @@ function card(n, words, showCol) {
       </div>
       ${n.fileId ? `<button class="pin" data-act="open" aria-label="Apri il file">📄</button>` : ''}
       ${n.link ? `<a class="pin" href="${esc(n.link)}" target="_blank" rel="noopener" aria-label="Apri il link">🔗</a>` : ''}
-      ${mapUrl ? `<a class="pin" href="${esc(mapUrl)}" target="_blank" rel="noopener" aria-label="Apri in Maps">📍</a>` : ''}
+      ${map ? `<a class="pin" href="${esc(map)}" target="_blank" rel="noopener" aria-label="Apri in Maps">📍</a>` : ''}
     </li>`;
 }
 
@@ -856,15 +865,11 @@ $('list').onclick = e => {
       const n = byId(id); if (n) openEditor(col.id, n);
     });
   } else if (act === 'check') {
-    const lines = note.body.split('\n');
-    const i = +e.target.closest('[data-line]').dataset.line;
-    lines[i] = lines[i].replace(/^- \[( |x)\]/i, (m, x) => x === ' ' ? '- [x]' : '- [ ]');
-    note.body = lines.join('\n');
-    changed(note);
+    toggleCheckLine(note, +e.target.closest('[data-line]').dataset.line);
   } else if (act === 'open') {
     openFile(note);
   } else if (act === 'edit') {
-    openEditor(colOf(note), note);
+    openView(note);
   }
 };
 
@@ -1420,6 +1425,62 @@ $('summaryBtn').onclick = () => {
   localStorage.setItem(SUMMARY_KEY, summaryOn ? 'on' : 'off');
   renderSummaryBtn();
   render();
+};
+
+// ===== Lettura di una scheda =====
+// Aprendo una scheda si legge soltanto: un tocco sul contenuto apre la modifica, scorrere no.
+const TAP_TOLERANCE = 10;
+const SCROLL_PAUSE = 250;
+const viewTap = { x: 0, y: 0, top: 0, scrolledAt: 0 };
+let viewId = null;
+function renderView(n) {
+  const c = colById(colOf(n));
+  const cat = catDoc.list.find(x => x.id === n.category);
+  const prio = PRIORITIES.find(p => p.id === n.priority);
+  const sub = [n.kind, n.maker, n.place, n.extra].filter(Boolean).join(' · ');
+  const map = mapUrl(n, c);
+  const badges = [
+    cat ? `<span class="badge">${esc(cat.label)}</span>` : '',
+    prio ? `<span class="badge" style="color:var(--${prio.id})">● ${prio.label}</span>` : '',
+    ...(n.tags || []).map(t => `<span class="badge tag">${c.tagPresets ? '' : '#'}${esc(t)}</span>`),
+  ].join('');
+  const actions = [
+    n.fileId ? `<button type="button" class="chip" data-view="file">📄 Apri il file</button>` : '',
+    n.link ? `<a class="chip" href="${esc(n.link)}" target="_blank" rel="noopener">🔗 Apri il link</a>` : '',
+    map ? `<a class="chip" href="${esc(map)}" target="_blank" rel="noopener">📍 Apri in Maps</a>` : '',
+  ].join('');
+  document.body.dataset.col = c.id;
+  $('viewCol').textContent = c.label;
+  $('viewContent').innerHTML = `
+    <h2 class="view-title">${esc(n.title)}</h2>
+    ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}
+    ${ratingHtml(n.rating)}
+    ${badges ? `<div class="meta">${badges}</div>` : ''}
+    ${actions ? `<div class="view-actions">${actions}</div>` : ''}
+    ${n.body ? `<div class="view-text">${formatBody(n.body, [], true)}</div>` : ''}
+    <p class="muted small view-hint">Tocca per modificare</p>`;
+}
+function openView(note) {
+  viewId = note.id;
+  renderView(note);
+  showSheet('viewSheet');
+  $('viewBody').scrollTop = 0;
+}
+$('viewBody').addEventListener('scroll', () => { viewTap.scrolledAt = Date.now(); });
+$('viewBody').addEventListener('pointerdown', e => {
+  viewTap.x = e.clientX; viewTap.y = e.clientY; viewTap.top = $('viewBody').scrollTop;
+});
+$('viewBody').onclick = e => {
+  const note = byId(viewId);
+  if (!note) return;
+  const box = e.target.closest('[data-act="check"]');
+  if (box) { toggleCheckLine(note, +box.dataset.line); return renderView(note); }
+  if (e.target.closest('[data-view="file"]')) return openFile(note);
+  if (e.target.closest('a, button')) return;
+  const moved = Math.hypot(e.clientX - viewTap.x, e.clientY - viewTap.y) > TAP_TOLERANCE;
+  const scrolled = $('viewBody').scrollTop !== viewTap.top || Date.now() - viewTap.scrolledAt < SCROLL_PAUSE;
+  if (moved || scrolled || String(getSelection()).trim()) return;
+  openEditor(colOf(note), note);
 };
 
 // ===== Avvio =====
