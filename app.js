@@ -79,12 +79,12 @@ function loadCategories() {
   return { list: DEFAULT_CATEGORIES, updated: 0 };
 }
 function storeCategories(doc) {
-  catDoc = { list: doc.list, updated: doc.updated };
+  catDoc = { list: doc.list, memo: doc.memo || '', updated: doc.updated };
   localStorage.setItem(CAT_KEY, JSON.stringify(catDoc));
   render();
 }
 function saveCategories(list) {
-  storeCategories({ list, updated: Date.now() });
+  storeCategories({ list, memo: catDoc.memo, updated: Date.now() });
   sync.pushCategories(catDoc);
 }
 function save() {
@@ -273,6 +273,8 @@ function render() {
   const home = !col && !searching;
   $('tiles').hidden = !home;
   if (home) renderTiles();
+  $('memo').hidden = !home;
+  if (home) renderMemo();
   $('agenda').hidden = !home;
   if (home) renderAgenda();
   renderTabs(col, searching);
@@ -295,17 +297,69 @@ function ratingHtml(r) {
   if (!r) return '';
   return `<div class="rating" aria-label="Voto ${r} su 5">${'★'.repeat(r)}<span class="off">${'★'.repeat(5 - r)}</span></div>`;
 }
+// Riassunto di una nota: calcolato sul dispositivo, il testo non esce dal telefono.
+// Una lista diventa le sue voci, un testo lungo la sua frase più significativa.
+const SUMMARY_KEY = 'jaccodo-riassunti';
+const SUMMARY_MAX = 90;
+const STOPWORDS = new Set(('il lo la i gli le un uno una di a da in con su per tra fra e ed o ma se che non è sono ho ha hanno del dello della dei degli delle ' +
+  'al allo alla ai agli alle dal dallo dalla dai dagli dalle nel nello nella nei negli nelle sul sullo sulla sui sugli sulle come più anche poi quindi perché ' +
+  'questo questa questi queste quello quella quelli quelle mi ti si ci vi ne era sia essere fare molto tutto tutti').split(' '));
+// Le parole che di solito indicano il punto della nota.
+const KEY_WORDS = new Set('bisogna devo dobbiamo serve servono ricorda ricordare importante urgente entro scadenza prenotare chiamare pagare comprare inviare mandare portare decidere controllare'.split(' '));
+let summaryOn = localStorage.getItem(SUMMARY_KEY) !== 'off';
+const cleanInline = s => s.replace(/\*\*|==/g, '').trim();
+const wordsOf = s => (s.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter(w => w.length > 2 && !STOPWORDS.has(w));
+function shorten(text) {
+  if (text.length <= SUMMARY_MAX) return text;
+  const cut = text.slice(0, SUMMARY_MAX);
+  return cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : SUMMARY_MAX).replace(/[\s,;:.]+$/, '') + '…';
+}
+function noteSummary(n) {
+  const lines = (n.body || '').split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return '';
+  const checks = lines.map(l => CHECK_LINE.exec(l)).filter(Boolean);
+  if (checks.length) {
+    const open = checks.filter(m => m[1] === ' ').map(m => cleanInline(m[2])).filter(Boolean);
+    return open.length ? shorten('Da fare: ' + open.join(', ')) : 'Tutto spuntato';
+  }
+  const bullets = lines.map(l => BULLET_LINE.exec(l)).filter(Boolean);
+  if (bullets.length) return shorten(bullets.map(m => cleanInline(m[1])).filter(Boolean).join(', '));
+  const text = cleanInline(lines.join(' '));
+  if (text.toLowerCase() === n.title.trim().toLowerCase()) return '';
+  if (text.length <= SUMMARY_MAX) return text;
+  const sentences = text.match(/[^.!?]+[.!?]*/g).map(s => s.trim()).filter(s => s.length > 8);
+  if (!sentences.length) return shorten(text);
+  const counts = {};
+  wordsOf(text).forEach(w => { counts[w] = (counts[w] || 0) + 1; });
+  const inTitle = new Set(wordsOf(n.title));
+  const score = (s, i) => {
+    const words = wordsOf(s);
+    const weight = words.reduce((sum, w) => sum + counts[w] + (inTitle.has(w) ? 6 : 0) + (KEY_WORDS.has(w) ? 5 : 0), 0);
+    return weight / Math.sqrt(words.length || 1) + (i === 0 ? 1 : 0);
+  };
+  let best = 0;
+  sentences.forEach((s, i) => { if (score(s, i) > score(sentences[best], best)) best = i; });
+  return shorten(sentences[best]);
+}
+function renderSummaryBtn() {
+  $('summaryBtn').textContent = `🧠 Riassunto nelle Note: ${summaryOn ? 'attivo' : 'disattivo'}`;
+}
+
 // Le note divise per categoria: ogni box è già in ordine di priorità.
 const BOX_COLORS = ['film', 'ristoranti', 'luoghi', 'attivita', 'regali', 'documenti', 'vini'];
 function miniCard(n) {
   const prio = PRIORITIES.find(p => p.id === n.priority);
   const boxes = (n.body || '').match(/^- \[[ x]\]/gim) || [];
   const ticked = boxes.filter(b => /x/i.test(b)).length;
+  const summary = summaryOn ? noteSummary(n) : '';
   return `<li class="item mini ${n.done ? 'done' : ''} ${prio ? 'prio-' + prio.id : ''}" data-id="${n.id}" data-col="note">
     <button class="check" data-act="toggle" aria-label="${n.done ? 'Da fare' : 'Completata'}"></button>
     <div class="content" data-act="edit">
-      <span class="title">${esc(n.title)}</span>
-      ${boxes.length ? `<span class="progress">${ticked}/${boxes.length}</span>` : ''}
+      <div class="mini-top">
+        <span class="title">${esc(n.title)}</span>
+        ${boxes.length ? `<span class="progress">${ticked}/${boxes.length}</span>` : ''}
+      </div>
+      ${summary ? `<div class="summary">${esc(summary)}</div>` : ''}
     </div>
   </li>`;
 }
@@ -337,7 +391,9 @@ function card(n, words, showCol) {
         <div class="title">${highlight(n.title, words)}</div>
         ${sub ? `<div class="sub">${highlight(sub, words)}</div>` : ''}
         ${ratingHtml(n.rating)}
-        ${n.body ? `<div class="body ${hasList(n.body) ? 'full' : ''}">${formatBody(n.body, words, true)}</div>` : ''}
+        ${n.body && c.id === 'note' && summaryOn && !words.length && !hasList(n.body)
+          ? `<div class="summary">${esc(noteSummary(n))}</div>`
+          : n.body ? `<div class="body ${hasList(n.body) ? 'full' : ''}">${formatBody(n.body, words, true)}</div>` : ''}
         <div class="meta">${[
           showCol ? `<span class="badge">${c.icon} ${esc(c.label)}</span>` : '',
           !ui.cat && cat ? `<span class="badge">${esc(cat.label)}</span>` : '',
@@ -839,6 +895,7 @@ $('list').onclick = e => {
 
 // ===== Menu: backup =====
 $('menuBtn').onclick = () => {
+  renderSummaryBtn();
   $('stats').textContent = COLLECTIONS.filter(c => !c.external).map(c => `${c.label}: ${inCol(c.id).length}`).join(' · ');
   showSheet('menu');
 };
@@ -1341,6 +1398,42 @@ async function initFiles() {
   render();
   runBackup();
 }
+
+// ===== Memo della home =====
+// Viaggia con le categorie, così arriva sugli altri dispositivi e finisce nei backup.
+let memoTimer = null;
+function sizeMemo() {
+  const memo = $('memo');
+  memo.style.height = 'auto';
+  memo.style.height = memo.scrollHeight + 'px';
+}
+function renderMemo() {
+  if (document.activeElement !== $('memo')) $('memo').value = catDoc.memo || '';
+  sizeMemo();
+}
+function pushMemo() {
+  if (!memoTimer) return;
+  clearTimeout(memoTimer);
+  memoTimer = null;
+  sync.pushCategories(catDoc);
+}
+$('memo').oninput = () => {
+  catDoc = { ...catDoc, memo: $('memo').value, updated: Date.now() };
+  localStorage.setItem(CAT_KEY, JSON.stringify(catDoc));
+  sizeMemo();
+  clearTimeout(memoTimer);
+  memoTimer = setTimeout(pushMemo, 1000);
+};
+$('memo').onblur = pushMemo;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') pushMemo();
+});
+$('summaryBtn').onclick = () => {
+  summaryOn = !summaryOn;
+  localStorage.setItem(SUMMARY_KEY, summaryOn ? 'on' : 'off');
+  renderSummaryBtn();
+  render();
+};
 
 // ===== Avvio =====
 if (history.state && history.state.sheet) history.replaceState({ inApp: history.state.inApp }, '');

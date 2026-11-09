@@ -21,6 +21,7 @@
     <div class="search">
       <input id="search" type="search" placeholder="Cerca in tutto…" autocomplete="off">
     </div>
+    <textarea id="memo" class="memo" rows="1" placeholder="📌 Memo importante…" aria-label="Memo importante" hidden></textarea>
     <nav id="statusTabs" class="tabs" hidden></nav>
     <div id="chips" class="chips filter-row" hidden></div>
     <div id="placeChips" class="chips filter-row" hidden></div>
@@ -145,6 +146,7 @@
       </div>
       <button id="calBtn" class="menu-item">📅 Google Calendar</button>
       <button id="backupBtn" class="menu-item">☁️ Backup su Drive</button>
+      <button id="summaryBtn" class="menu-item"></button>
       <button id="reorderBtn" class="menu-item">↕︎ Cambia l'ordine dei riquadri</button>
       <button id="exportBtn" class="menu-item">⬇︎ Esporta backup (.json)</button>
       <label class="menu-item">⬆︎ Importa backup
