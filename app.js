@@ -364,6 +364,12 @@ function toggleCheckLine(note, i) {
   note.body = lines.join('\n');
   changed(note);
 }
+// Le prime righe non vuote di un testo, con "…" se continua.
+const PREVIEW_LINES = 3;
+function previewText(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  return lines.slice(0, PREVIEW_LINES).join('\n') + (lines.length > PREVIEW_LINES ? '\n…' : '');
+}
 function card(n, words, showCol) {
   const c = colById(colOf(n));
   const cat = catDoc.list.find(x => x.id === n.category);
@@ -377,7 +383,10 @@ function card(n, words, showCol) {
         <div class="title">${highlight(c.id === 'note' && !words.length ? shortTitle(n.title) : n.title, words)}</div>
         ${sub ? `<div class="sub">${highlight(sub, words)}</div>` : ''}
         ${ratingHtml(n.rating)}
-        ${n.body ? `<div class="body ${hasList(n.body) || c.id === 'note' ? 'full' : ''}">${formatBody(n.body, words, true)}</div>` : ''}
+        ${n.body ? (c.id === 'appunti'
+          // Negli appunti solo un'anteprima: il testo intero si legge aprendo la scheda.
+          ? `<div class="body preview">${formatBody(previewText(n.body), words, false)}</div>`
+          : `<div class="body ${hasList(n.body) || c.id === 'note' ? 'full' : ''}">${formatBody(n.body, words, true)}</div>`) : ''}
         <div class="meta">${[
           showCol ? `<span class="badge">${c.icon} ${esc(c.label)}</span>` : '',
           !ui.cat && cat ? `<span class="badge">${esc(cat.label)}</span>` : '',

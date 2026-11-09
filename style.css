@@ -213,7 +213,7 @@ body.reordering .tile:not(.dragging) { opacity: .75; }
 .body { color: var(--muted); font-size: 12px; margin-top: 1px; white-space: pre-wrap; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .body.full { display: block; }
-.item[data-col="appunti"] .body { -webkit-line-clamp: 4; }
+.body.preview { display: block; max-height: 5.6em; overflow: hidden; }
 .body strong, .body-preview strong { color: var(--text); }
 .ln.bullet, .ln.boxed { display: flex; gap: 7px; align-items: flex-start; }
 .ln .dot { flex: 0 0 auto; }
