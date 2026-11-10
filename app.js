@@ -61,6 +61,7 @@ const WORK_DAY = 3; // 0 = domenica ... 3 = mercoledì
 
 // ===== Dati =====
 const STORE_KEY = 'note-app-v1';
+const APP_VERSION = 19; // Deve coincidere con CACHE in sw.js.
 let notes = load();
 // Le categorie si possono cambiare dall'app. "updated" dice quale versione è la più recente.
 const CAT_KEY = 'le-mie-cose-categorie';
@@ -102,7 +103,7 @@ const sync = { push: () => {}, remove: () => {}, pushCategories: () => {} };
 window.noteApp = {
   sync,
   getNotes: () => notes,
-  replaceAll(list) { notes = list; save(); render(); },
+  replaceAll(list) { notes = list; save(); render(); queueDueSync(); },
   CAT_DOC,
   getCategories: () => catDoc,
   setCategories(doc) { if (Array.isArray(doc.list)) storeCategories(doc); },
@@ -111,6 +112,7 @@ function changed(note) {
   note.updated = Date.now();
   save(); render();
   sync.push(note);
+  queueDueSync();
 }
 
 function parseTags(str) {
@@ -209,10 +211,12 @@ function go(col, keepFilters) {
   render();
   window.scrollTo(0, 0);
 }
-const SHEETS = ['sheet', 'menu', 'picker', 'calSheet', 'catSheet', 'fileSheet', 'backupSheet', 'viewSheet'];
+const SHEETS = ['sheet', 'menu', 'picker', 'calSheet', 'catSheet', 'fileSheet', 'backupSheet', 'viewSheet', 'pwdSheet'];
 function hideSheets() {
   SHEETS.forEach(id => { $(id).hidden = true; });
   editing = null;
+  memoMove = null;
+  if (pwdResolve) { pwdResolve(null); pwdResolve = null; }
 }
 function showSheet(id) {
   const alreadyOpen = SHEETS.some(s => !$(s).hidden);
@@ -257,8 +261,10 @@ const prioRank = p => (PRIORITIES.find(x => x.id === p) || { rank: 9 }).rank;
 function sorted(list) {
   return list.slice().sort((a, b) =>
     (!!a.done - !!b.done)
+    || (isLate(b) - isLate(a)) // Le scadenze già passate vanno in cima.
     || ((b.rating || 0) - (a.rating || 0))
     || (prioRank(a.priority) - prioRank(b.priority))
+    || ((a.due || Infinity) - (b.due || Infinity))
     || (b.updated - a.updated));
 }
 
@@ -275,6 +281,7 @@ function render() {
   $('tiles').hidden = !home;
   if (home) renderTiles();
   $('memo').hidden = !home;
+  $('memoToNote').hidden = !home || !(catDoc.memo || '').trim();
   if (home) renderMemo();
   $('agenda').hidden = !home;
   if (home) renderAgenda();
@@ -335,6 +342,7 @@ function miniCard(n) {
     <div class="content" data-act="edit">
       <div class="mini-top">
         <span class="title">${esc(shortTitle(n.title))}</span>
+        ${n.due && !n.done ? `<span class="due ${isLate(n) ? 'late' : ''}">⏰ ${esc(dayLabel(startOfDay(n.due)))}</span>` : ''}
         ${boxes.length ? `<span class="progress">${ticked}/${boxes.length}</span>` : ''}
       </div>
     </div>
@@ -391,6 +399,7 @@ function card(n, words, showCol) {
           showCol ? `<span class="badge">${c.icon} ${esc(c.label)}</span>` : '',
           !ui.cat && cat ? `<span class="badge">${esc(cat.label)}</span>` : '',
           prio ? `<span class="badge" style="color:var(--${prio.id})">● ${prio.label}</span>` : '',
+          dueBadge(n),
           n.fileId ? fileBadge(n) : '',
           ...(n.tags || []).map(t => `<span class="badge tag">${c.tagPresets ? '' : '#'}${esc(t)}</span>`),
         ].join('')}</div>
@@ -464,6 +473,9 @@ function renderHint(col, home) {
   const hasWork = catDoc.list.some(c => c.id === 'lavoro');
   hint.hidden = !hasWork || !((home && isWorkDay) || (col && col.id === 'note' && ui.cat === 'lavoro'));
   if (!hint.hidden) hint.textContent = `📅 ${nextWorkDayLabel()} · ${pending} da fare`;
+  hint.dataset.go = '';
+  const due = col && col.id === 'note' ? dueHint() : null;
+  if (due) { hint.hidden = false; hint.textContent = due.text; hint.dataset.go = due.go; }
   if (col && col.id === 'documenti') {
     const text = backupHint();
     hint.hidden = !text;
@@ -481,6 +493,7 @@ function nextWorkDayLabel() {
 
 // ===== Editor =====
 let editing = null;
+let memoMove = null; // Testo del memo che sta diventando una nota.
 let form = {};
 const TEXT_FIELDS = [['Maker', 'maker'], ['Place', 'place'], ['Extra', 'extra'], ['Link', 'link']];
 
@@ -509,6 +522,7 @@ function openEditor(colId, note) {
   $('fFile').value = '';
   $('fFileName').textContent = note && note.fileName ? note.fileName + ' (tocca per sostituirlo)' : 'Scegli un file o fai una foto';
   $('fLink').value = note ? note.link || '' : '';
+  $('fDue').value = note && note.due ? toLocalInput(note.due) : '';
   $('fTags').value = note ? (note.tags || []).join(' ') : (ui.tag || '');
   $('deleteBtn').hidden = !note;
 
@@ -708,6 +722,7 @@ $('fBody').oninput = () => {
 
 $('editor').onsubmit = async e => {
   e.preventDefault();
+  const fromMemo = memoMove;
   const title = $('fTitle').value.trim();
   if (!title) { $('fTitle').focus(); return toast('Scrivi almeno il nome'); }
   const isNote = form.col === 'note';
@@ -743,6 +758,7 @@ $('editor').onsubmit = async e => {
     tags: isNote ? parseTags($('fTags').value) : form.tags,
     category: isNote ? form.category : null,
     priority: isNote ? form.priority : null,
+    due: isNote && $('fDue').value ? new Date($('fDue').value).getTime() : null,
   };
   // Cerco per id: nel frattempo la lista può essere stata aggiornata dalla sync.
   let note = editing && byId(editing.id);
@@ -752,25 +768,27 @@ $('editor').onsubmit = async e => {
   ui.tab = ui.col === note.col ? (note.done ? 'done' : 'todo') : ui.tab;
   changed(note);
   if (fileData) runBackup();
+  if (fromMemo) removeFromMemo(fromMemo);
 };
 $('deleteBtn').onclick = () => {
   const removed = byId(editing.id) || editing;
   notes = notes.filter(n => n.id !== removed.id);
   save(); closeSheet(); render();
   sync.remove(removed.id);
-  toast('Eliminato', 'Annulla', () => { notes.push(removed); changed(removed); });
+  if (removed.eventId) postScript({ kind: 'evento', eventId: removed.eventId }).catch(() => {});
+  toast('Eliminato', 'Annulla', () => { removed.eventId = null; removed.eventSig = ''; notes.push(removed); changed(removed); });
 };
 
 // ===== Eventi principali =====
 $('addBtn').onclick = () => {
+  pendingShare = null;
   if (ui.col) return openEditor(ui.col);
-  $('pickerList').innerHTML = orderedCollections().filter(c => !c.external).map(c =>
-    `<button data-pick="${c.id}"><span class="tile-icon">${c.icon}</span>${esc(c.add.replace(/^Nuov[oa] /, '').replace(/^./, m => m.toUpperCase()))}</button>`).join('');
-  showSheet('picker');
+  openPicker('Cosa vuoi segnare?');
 };
 $('pickerList').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
   openEditor(b.dataset.pick);
+  if (pendingShare) { fillShared(pendingShare, colById(b.dataset.pick)); pendingShare = null; }
 };
 $('backBtn').onclick = () => {
   if (history.state && history.state.inApp) history.back();
@@ -836,6 +854,8 @@ function endTileDrag() {
 document.addEventListener('pointerup', endTileDrag);
 document.addEventListener('pointercancel', endTileDrag);
 $('hint').onclick = () => {
+  if ($('hint').dataset.go === 'cal') return openCalSheet();
+  if ($('hint').dataset.go === 'backup') return openBackupSheet();
   if (ui.col === 'documenti') return openBackupSheet();
   if (ui.col === 'note') return;
   resetFilters(); ui.cat = 'lavoro'; go('note', true);
@@ -885,6 +905,7 @@ $('list').onclick = e => {
 // ===== Menu: backup =====
 $('menuBtn').onclick = () => {
   renderSummaryBtn();
+  $('appVersion').textContent = `Jaccodo · versione ${APP_VERSION}`;
   $('stats').textContent = COLLECTIONS.filter(c => !c.external).map(c => `${c.label}: ${inCol(c.id).length}`).join(' · ');
   showSheet('menu');
 };
@@ -904,7 +925,7 @@ $('exportBtn').onclick = () => {
 $('importInput').onchange = async e => {
   const file = e.target.files[0]; if (!file) return;
   try {
-    const data = JSON.parse(await file.text());
+    const data = JSON.parse(await readBackupText(file));
     if (!Array.isArray(data)) throw new Error();
     const cats = data.find(n => n && n.id === CAT_DOC);
     if (cats && cats.updated > catDoc.updated) window.noteApp.setCategories(cats);
@@ -927,8 +948,9 @@ $('importInput').onchange = async e => {
     imported.forEach(n => sync.push(n));
     toast(`Importati ${imported.length} elementi` + (skipped ? ` · ${skipped} già presenti` : ''));
     runBackup();
-  } catch {
-    toast('File non valido');
+  } catch (err) {
+    if (!$('pwdSheet').hidden) closeSheet();
+    toast(err.message === 'password' ? 'Password sbagliata' : err.message === 'annullato' ? 'Importazione annullata' : 'File non valido');
   }
   e.target.value = '';
 };
@@ -1025,6 +1047,22 @@ const CAL_SCRIPT = `function doGet() {
 }
 function doPost(e) {
   var data = JSON.parse(e.postData.contents);
+  if (data.kind === 'evento') {
+    // Promemoria delle scadenze: un evento sul calendario principale, con avviso all'ora giusta.
+    var cal = CalendarApp.getDefaultCalendar();
+    var old = data.eventId ? cal.getEventById(data.eventId) : null;
+    if (old) old.deleteEvent();
+    var out = { ok: true };
+    if (data.title) {
+      var start = new Date(data.start);
+      var ev = cal.createEvent(data.title, start, new Date(start.getTime() + 30 * 60 * 1000), { description: data.description || '' });
+      ev.removeAllReminders();
+      ev.addPopupReminder(0);
+      out.eventId = ev.getId();
+    }
+    return ContentService.createTextOutput(JSON.stringify(out))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   var found = DriveApp.getFoldersByName('Jaccodo backup');
   var folder = found.hasNext() ? found.next() : DriveApp.createFolder('Jaccodo backup');
   var same = data.name ? folder.getFilesByName(data.name) : null;
@@ -1040,6 +1078,10 @@ function doPost(e) {
 // Da eseguire una volta nell'editor: fa chiedere a Google il permesso di creare file su Drive.
 function autorizzaDrive() {
   if (!DriveApp.getFoldersByName('Jaccodo backup').hasNext()) DriveApp.createFolder('Jaccodo backup');
+}
+// Da eseguire una volta nell'editor: fa chiedere a Google il permesso di creare i promemoria.
+function autorizzaCalendario() {
+  CalendarApp.getDefaultCalendar().createEvent('Jaccodo prova', new Date(), new Date()).deleteEvent();
 }`;
 const agenda = { events: [], updated: 0, loading: false, error: false, showAll: false };
 try { Object.assign(agenda, JSON.parse(localStorage.getItem(CAL_CACHE_KEY)) || {}); } catch {}
@@ -1182,15 +1224,18 @@ document.addEventListener('visibilitychange', () => {
 const FILE_DB = 'jaccodo-file';
 const FILE_STORE = 'files';
 const localFiles = new Set();
-function fileStore(mode, action) {
+// Versione 2: oltre ai file, "inbox" per Condividi e "keys" per la password del backup.
+function fileStore(mode, action, store = FILE_STORE) {
   return new Promise((resolve, reject) => {
-    const open = indexedDB.open(FILE_DB, 1);
-    open.onupgradeneeded = () => open.result.createObjectStore(FILE_STORE);
+    const open = indexedDB.open(FILE_DB, 2);
+    open.onupgradeneeded = () => [FILE_STORE, 'inbox', KEY_STORE].forEach(name => {
+      if (!open.result.objectStoreNames.contains(name)) open.result.createObjectStore(name);
+    });
     open.onerror = () => reject(open.error);
     open.onsuccess = () => {
       const db = open.result;
-      const tx = db.transaction(FILE_STORE, mode);
-      const req = action(tx.objectStore(FILE_STORE));
+      const tx = db.transaction(store, mode);
+      const req = action(tx.objectStore(store));
       tx.oncomplete = () => { db.close(); resolve(req.result); };
       tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
     };
@@ -1263,10 +1308,11 @@ function saveBackupState() {
 }
 const toBackup = () => docNotes().filter(n => n.fileId && !n.backedUp && localFiles.has(n.fileId));
 const tooBig = n => n.fileSize > BACKUP_MAX;
-async function postBackup(payload) {
+async function postScript(payload) {
   const res = await fetch(calUrl(), { method: 'POST', body: JSON.stringify(payload) });
   const data = await res.json();
   if (!data.ok) throw new Error('Risposta non valida');
+  return data;
 }
 const toBase64 = file => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -1275,7 +1321,7 @@ const toBase64 = file => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 async function runBackup() {
-  if (!backup.on || !calUrl() || backup.running || !navigator.onLine) return;
+  if (!backup.on || !backupKey || !calUrl() || backup.running || !navigator.onLine) return;
   backup.running = true;
   let sent = 0;
   try {
@@ -1284,14 +1330,14 @@ async function runBackup() {
       if (!n) continue;
       const { fileId } = n;
       const file = await getFile(fileId);
-      await postBackup({ kind: 'file', name: n.backupName, type: n.fileType, base64: await toBase64(file) });
+      await postScript({ kind: 'file', name: n.backupName + '.jaccodo', type: 'application/octet-stream', base64: await encryptedBase64(new Uint8Array(await file.arrayBuffer())) });
       const current = byId(id);
       if (current && current.fileId === fileId) { current.backedUp = true; changed(current); }
       sent++;
     }
     // Una copia di titoli, tag e appunti: serve per ricostruire tutto su un telefono nuovo.
     if (sent || Date.now() - backup.dataAt > DATA_EVERY) {
-      await postBackup({ kind: 'dati', name: 'Jaccodo-dati.json', text: JSON.stringify([...notes, { id: CAT_DOC, ...catDoc }], null, 2) });
+      await postScript({ kind: 'dati', name: 'Jaccodo-dati.jaccodo', text: await encryptedBase64(new TextEncoder().encode(JSON.stringify([...notes, { id: CAT_DOC, ...catDoc }]))) });
       backup.dataAt = Date.now();
     }
     backup.last = Date.now();
@@ -1307,6 +1353,7 @@ async function runBackup() {
 function backupHint() {
   if (!docNotes().length) return '';
   if (!backup.on) return '☁️ Attiva il backup automatico su Drive';
+  if (!backupKey) return '🔒 Imposta la password del backup su Drive';
   if (backup.error) return `⚠️ Backup non riuscito: ${toBackup().length} file in attesa. Tocca per controllare`;
   return '';
 }
@@ -1315,6 +1362,7 @@ function renderBackupStatus() {
   const big = waiting.filter(tooBig).length;
   const missing = docNotes().filter(n => n.fileId && !localFiles.has(n.fileId)).length;
   const lines = [
+    backupKey ? '🔒 Protetto da password.' : '🔓 Prima imposta una password: senza, il backup non parte.',
     !backup.on ? 'Backup non attivo su questo dispositivo.'
       : backup.error ? 'L\'ultimo backup non è riuscito: riproverò da solo.'
       : backup.last ? `Attivo. Ultimo controllo: ${dayLabel(startOfDay(backup.last)).toLowerCase()} alle ${clock(backup.last)}.` : 'Attivo.',
@@ -1326,6 +1374,7 @@ function renderBackupStatus() {
   $('backupCode').value = CAL_SCRIPT;
   $('backupOn').textContent = backup.on ? 'Riprova adesso' : 'Attiva il backup';
   $('backupOff').hidden = !backup.on;
+  $('backupPwdSave').textContent = backupKey ? 'Cambia la password' : 'Imposta la password';
   $('backupRelinkWrap').hidden = !missing;
 }
 function openBackupSheet() {
@@ -1344,9 +1393,10 @@ $('backupCopy').onclick = async () => {
 };
 $('backupOn').onclick = async () => {
   if (!calUrl()) { toast('Prima collega Google Calendar'); return openCalSheet(); }
+  if (!backupKey) { $('backupPwd').focus(); return toast('Prima imposta la password del backup'); }
   $('backupOn').disabled = true;
   try {
-    await postBackup({ kind: 'ping' });
+    await postScript({ kind: 'ping' });
     backup.on = true;
     backup.error = false;
     saveBackupState();
@@ -1369,17 +1419,31 @@ $('backupOff').onclick = () => {
 // Su un dispositivo nuovo: scarichi i file dal Drive e l'app li rimette al loro posto.
 $('backupRelink').onchange = async e => {
   let linked = 0;
+  let failed = 0;
+  let password = null;
   for (const file of e.target.files) {
-    const n = docNotes().find(x => x.fileId && !localFiles.has(x.fileId) && (x.backupName === file.name || x.fileName === file.name));
+    // Le copie protette finiscono con .jaccodo: le apro con la password del backup.
+    const encrypted = file.name.endsWith('.jaccodo');
+    const name = encrypted ? file.name.slice(0, -'.jaccodo'.length) : file.name;
+    const n = docNotes().find(x => x.fileId && !localFiles.has(x.fileId) && (x.backupName === name || x.fileName === name));
     if (!n) continue;
     try {
-      await putFile(n.fileId, file);
+      let content = file;
+      if (encrypted) {
+        if (password === null) password = await askPassword('I file del backup sono protetti: scrivi la password.');
+        if (password === null) break;
+        content = new File([await decryptBytes(new Uint8Array(await file.arrayBuffer()), password)], n.fileName, { type: n.fileType });
+      }
+      await putFile(n.fileId, content);
       localFiles.add(n.fileId);
       linked++;
-    } catch {}
+    } catch {
+      failed++;
+    }
   }
   e.target.value = '';
-  toast(`File ricollegati: ${linked}`);
+  if (password !== null) closeSheet();
+  toast(`File ricollegati: ${linked}` + (failed ? ` · ${failed} non aperti (password sbagliata?)` : ''));
   render();
   renderBackupStatus();
 };
@@ -1388,6 +1452,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') runBackup();
 });
 async function initFiles() {
+  backupKey = await fileStore('readonly', s => s.get('backup'), KEY_STORE).catch(() => null) || null;
   try {
     const ids = await allFileIds();
     ids.forEach(id => localFiles.add(id));
@@ -1422,6 +1487,7 @@ $('memo').oninput = () => {
   catDoc = { ...catDoc, memo: $('memo').value, updated: Date.now() };
   localStorage.setItem(CAT_KEY, JSON.stringify(catDoc));
   sizeMemo();
+  $('memoToNote').hidden = !$('memo').value.trim();
   clearTimeout(memoTimer);
   memoTimer = setTimeout(pushMemo, 1000);
 };
@@ -1451,6 +1517,7 @@ function renderView(n) {
   const badges = [
     cat ? `<span class="badge">${esc(cat.label)}</span>` : '',
     prio ? `<span class="badge" style="color:var(--${prio.id})">● ${prio.label}</span>` : '',
+    dueBadge(n),
     ...(n.tags || []).map(t => `<span class="badge tag">${c.tagPresets ? '' : '#'}${esc(t)}</span>`),
   ].join('');
   const actions = [
@@ -1492,6 +1559,226 @@ $('viewBody').onclick = e => {
   openEditor(colOf(note), note);
 };
 
+// Password del backup: i file vengono cifrati sul telefono prima di andare su Drive.
+// La chiave resta in IndexedDB e non si può esportare; la password non viene salvata.
+const KEY_STORE = 'keys';
+const MAGIC = new TextEncoder().encode('JCD1');
+let backupKey = null;
+async function deriveKey(password, salt) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' }, base,
+    { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+// Formato: "JCD1" + sale (16) + iv (12) + dati cifrati. Il sale nel file permette di aprirlo da qualsiasi dispositivo.
+async function encryptBytes(bytes) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, backupKey.key, bytes));
+  const out = new Uint8Array(4 + 16 + 12 + data.length);
+  out.set(MAGIC, 0); out.set(backupKey.salt, 4); out.set(iv, 20); out.set(data, 32);
+  return out;
+}
+async function decryptBytes(bytes, password) {
+  if (MAGIC.some((b, i) => bytes[i] !== b)) throw new Error('formato');
+  const key = await deriveKey(password, bytes.slice(4, 20));
+  try {
+    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(20, 32) }, key, bytes.slice(32)));
+  } catch {
+    throw new Error('password');
+  }
+}
+const encryptedBase64 = async bytes => toBase64(new Blob([await encryptBytes(bytes)]));
+// Un backup scaricato da Drive può essere cifrato (testo base64) o un vecchio JSON in chiaro.
+async function readBackupText(file) {
+  const text = await file.text();
+  if (/^\s*[[{]/.test(text)) return text;
+  const bytes = Uint8Array.from(atob(text.trim()), c => c.charCodeAt(0));
+  const password = await askPassword('Il backup è protetto: scrivi la password.');
+  if (password === null) throw new Error('annullato');
+  return new TextDecoder().decode(await decryptBytes(bytes, password));
+}
+let pwdResolve = null;
+function askPassword(info) {
+  $('pwdInfo').textContent = info;
+  $('pwdInput').value = '';
+  showSheet('pwdSheet');
+  setTimeout(() => $('pwdInput').focus(), 50);
+  return new Promise(resolve => { pwdResolve = resolve; });
+}
+$('pwdOk').onclick = () => {
+  const resolve = pwdResolve;
+  pwdResolve = null;
+  if (resolve) resolve($('pwdInput').value);
+};
+$('pwdInput').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('pwdOk').click(); } };
+$('backupPwdSave').onclick = async () => {
+  const password = $('backupPwd').value;
+  if (password.length < 8) return toast('Usa almeno 8 caratteri');
+  if (password !== $('backupPwd2').value) return toast('Le due password non coincidono');
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  backupKey = { key: await deriveKey(password, salt), salt };
+  try {
+    await fileStore('readwrite', s => s.put(backupKey, 'backup'), KEY_STORE);
+  } catch {
+    return toast('Non riesco a salvare la password su questo dispositivo');
+  }
+  $('backupPwd').value = $('backupPwd2').value = '';
+  // Le copie già su Drive non sono protette: le rifaccio tutte cifrate.
+  docNotes().forEach(n => { if (n.backedUp) { n.backedUp = false; changed(n); } });
+  backup.dataAt = 0;
+  saveBackupState();
+  toast('Password del backup impostata');
+  renderBackupStatus();
+  runBackup();
+};
+
+// ===== Scadenze: promemoria su Google Calendar =====
+// La notifica la manda l'app Google Calendar: per ogni scadenza c'è un evento con avviso all'ora giusta.
+let dueTimer = null;
+let dueRunning = false;
+let dueError = false;
+const dueSig = n => !n.done && n.due ? `${n.title}|${n.due}` : '';
+const isLate = n => !n.done && !!n.due && n.due < Date.now();
+const dueText = ms => `${dayLabel(startOfDay(ms))} ${clock(ms)}`;
+const dueBadge = n => n.due && !n.done ? `<span class="badge ${isLate(n) ? 'late' : ''}">⏰ ${esc(dueText(n.due))}</span>` : '';
+const toLocalInput = ms => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+function queueDueSync() {
+  clearTimeout(dueTimer);
+  dueTimer = setTimeout(syncDueEvents, 800);
+}
+async function syncDueEvents() {
+  if (dueRunning || !calUrl() || !navigator.onLine) return;
+  dueRunning = true;
+  const before = dueError;
+  try {
+    for (const { id } of inCol('note').filter(n => dueSig(n) !== (n.eventSig || ''))) {
+      const n = byId(id);
+      if (!n) continue;
+      const sig = dueSig(n);
+      const res = await postScript({ kind: 'evento', eventId: n.eventId || '', title: sig ? '📝 ' + n.title : '', start: n.due, description: n.body || '' });
+      if (sig && !res.eventId) throw new Error('Script senza promemoria');
+      const current = byId(id);
+      if (!current || dueSig(current) !== sig) continue; // Cambiata nel frattempo: la riprendo al prossimo giro.
+      current.eventId = res.eventId || null;
+      current.eventSig = sig;
+      changed(current);
+    }
+    dueError = false;
+  } catch {
+    dueError = true;
+  }
+  dueRunning = false;
+  if (dueError !== before) render();
+}
+function dueHint() {
+  if (!inCol('note').some(n => n.due && !n.done)) return null;
+  if (!calUrl()) return { text: '⏰ Collega Google Calendar per ricevere le notifiche delle scadenze', go: 'cal' };
+  if (dueError) return { text: '⚠️ Le scadenze non arrivano su Google Calendar: aggiorna lo script', go: 'backup' };
+  return null;
+}
+window.addEventListener('online', queueDueSync);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') queueDueSync();
+});
+
+// ===== Memo che diventa nota =====
+// Prende la riga dove sei (o il testo selezionato); salvata la nota, la toglie dal memo.
+function removeFromMemo(text) {
+  const memo = catDoc.memo || '';
+  const i = memo.indexOf(text);
+  if (i < 0) return;
+  // Tolgo anche l'a capo della riga, così non resta una riga vuota.
+  let from = i;
+  let to = i + text.length;
+  if (memo[to] === '\n') to++;
+  else if (from > 0 && memo[from - 1] === '\n') from--;
+  const rest = memo.slice(0, from) + memo.slice(to);
+  catDoc = { ...catDoc, memo: rest, updated: Date.now() };
+  localStorage.setItem(CAT_KEY, JSON.stringify(catDoc));
+  sync.pushCategories(catDoc);
+  renderMemo();
+}
+$('memoToNote').onclick = () => {
+  const memo = $('memo');
+  const value = memo.value;
+  let start = memo.selectionStart;
+  let end = memo.selectionEnd;
+  if (start === end) {
+    start = value.lastIndexOf('\n', start - 1) + 1;
+    end = value.indexOf('\n', start);
+    if (end < 0) end = value.length;
+  }
+  const text = value.slice(start, end).trim();
+  if (!text) return toast('Tocca una riga del memo, poi il pulsante');
+  const [first, ...rest] = text.split('\n');
+  openEditor('note');
+  memoMove = text;
+  $('fTitle').value = first.trim();
+  $('fBody').value = rest.join('\n').trim();
+  bodyLength = $('fBody').value.length;
+  renderBodyPreview();
+};
+
+// ===== Condividi → Jaccodo =====
+// Il service worker riceve quello che condividi da un'altra app e lo lascia qui; tu scegli dove salvarlo.
+let pendingShare = null;
+function openPicker(title) {
+  $('pickerTitle').textContent = title;
+  $('pickerList').innerHTML = orderedCollections().filter(c => !c.external).map(c =>
+    `<button data-pick="${c.id}"><span class="tile-icon">${c.icon}</span>${esc(c.add.replace(/^Nuov[oa] /, '').replace(/^./, m => m.toUpperCase()))}</button>`).join('');
+  showSheet('picker');
+}
+function fillShared(item, col) {
+  const file = (item.files || [])[0];
+  const link = linkUrl(item.url) || (/https?:\/\//i.test(item.text) ? linkUrl(item.text) : '');
+  const text = (item.text || '').replace(/https?:\/\/\S+/gi, '').trim();
+  const title = (item.title || '').trim() || text.split('\n')[0] || (file ? file.name.replace(/\.[^.]+$/, '') : '') || (link ? new URL(link).hostname : '');
+  $('fTitle').value = title.slice(0, 120);
+  if (col.link) $('fLink').value = link;
+  $('fBody').value = [text !== title ? text : '', !col.link ? link : ''].filter(Boolean).join('\n');
+  bodyLength = $('fBody').value.length;
+  renderBodyPreview();
+  if (file && col.files) {
+    form.file = file;
+    $('fFileName').textContent = file.name;
+  } else if (file) {
+    toast('Per salvare il file scegli Documentazione o Appunti');
+  }
+}
+async function checkShared() {
+  if (!new URLSearchParams(location.search).has('shared')) return;
+  history.replaceState(history.state, '', location.pathname + location.hash);
+  const item = await fileStore('readwrite', s => { const req = s.get('share'); s.delete('share'); return req; }, 'inbox').catch(() => null);
+  if (!item) return;
+  pendingShare = item;
+  openPicker('Dove lo salvo?');
+}
+
+// ===== Versione e aggiornamento automatico =====
+// Quando il telefono scarica una versione nuova l'app si ricarica da sola, ma mai mentre stai scrivendo.
+let updateReady = false;
+const busyWriting = () => SHEETS.some(id => !$(id).hidden) || document.activeElement === $('memo');
+function reloadIfReady() {
+  if (updateReady && !busyWriting()) location.reload();
+}
+if ('serviceWorker' in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return; // Prima installazione: niente da ricaricare.
+    updateReady = true;
+    reloadIfReady();
+  });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+  }).catch(() => {});
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') reloadIfReady();
+  });
+  window.addEventListener('popstate', reloadIfReady);
+  $('memo').addEventListener('blur', reloadIfReady);
+}
+
 // ===== Avvio =====
 if (history.state && history.state.sheet) history.replaceState({ inApp: history.state.inApp }, '');
 ui.col = colFromHash();
@@ -1499,6 +1786,5 @@ render();
 loadAgenda();
 initFiles();
 
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
-}
+checkShared();
+syncDueEvents();

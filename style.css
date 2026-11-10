@@ -113,6 +113,7 @@ h1 {
   font-size: 13px; font-weight: 500; line-height: 1.3; box-shadow: 0 2px 5px rgba(40, 30, 10, .3);
 }
 .memo::placeholder { color: #75662a; }
+.memo-action { display: block; margin: 4px 0 0 auto; }
 
 .tabs { display: flex; gap: 4px; margin-top: 6px; padding: 2px; background: var(--line); border-radius: 12px; }
 .tabs button {
@@ -195,6 +196,8 @@ body.reordering .tile:not(.dragging) { opacity: .75; }
 .item.mini .title { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; line-height: 1.2;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .item.mini.prio-alta .title { font-weight: 700; }
+.item.mini .due { flex: 0 0 auto; font-size: 10px; color: var(--muted); }
+.item.mini .due.late, .badge.late { color: var(--alta); font-weight: 700; }
 .item.mini .progress { flex: 0 0 auto; font-size: 10px; color: var(--muted); }
 .check {
   flex: 0 0 auto; width: 32px; height: 32px; padding: 0; border: 0; background: none;

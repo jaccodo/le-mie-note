@@ -22,6 +22,7 @@
       <input id="search" type="search" placeholder="Cerca in tutto…" autocomplete="off">
     </div>
     <textarea id="memo" class="memo" rows="1" placeholder="📌 Memo importante…" aria-label="Memo importante" hidden></textarea>
+    <button type="button" id="memoToNote" class="chip memo-action" hidden>➜ Trasforma in nota</button>
     <nav id="statusTabs" class="tabs" hidden></nav>
     <div id="chips" class="chips filter-row" hidden></div>
     <div id="placeChips" class="chips filter-row" hidden></div>
@@ -41,7 +42,7 @@
   <div id="picker" class="sheet" hidden>
     <div class="sheet-body">
       <div class="sheet-head">
-        <span></span><strong>Cosa vuoi segnare?</strong>
+        <span></span><strong id="pickerTitle">Cosa vuoi segnare?</strong>
         <button type="button" class="link-btn" data-close>Chiudi</button>
       </div>
       <div id="pickerList" class="picker-list"></div>
@@ -123,6 +124,10 @@
           <div id="fPrio" class="seg"></div>
         </div>
         <div class="field">
+          <label class="field-label" for="fDue">Scadenza <small>(facoltativa: ti avvisa Google Calendar)</small></label>
+          <input id="fDue" type="datetime-local">
+        </div>
+        <div class="field">
           <label class="field-label" for="fTags">Tag <small>(separati da spazio o virgola)</small></label>
           <input id="fTags" placeholder="es. spesa urgente telefonare" autocomplete="off">
           <div id="tagSuggest" class="chips"></div>
@@ -150,10 +155,11 @@
       <button id="reorderBtn" class="menu-item">↕︎ Cambia l'ordine dei riquadri</button>
       <button id="exportBtn" class="menu-item">⬇︎ Esporta backup (.json)</button>
       <label class="menu-item">⬆︎ Importa backup
-        <input id="importInput" type="file" accept="application/json" hidden>
+        <input id="importInput" type="file" accept="application/json,.json,.jaccodo,text/plain,application/octet-stream" hidden>
       </label>
       <button id="clearDoneBtn" class="menu-item">🧹 Elimina le note completate</button>
       <p class="muted small" id="stats"></p>
+      <p class="muted small" id="appVersion"></p>
     </div>
   </div>
 
@@ -196,10 +202,16 @@
           <textarea id="backupCode" class="cal-code" rows="4" readonly aria-label="Codice dello script"></textarea>
           <button type="button" id="backupCopy" class="chip">Copia il codice</button>
         </li>
-        <li>Nell'elenco delle funzioni scegli <b>autorizzaDrive</b> e tocca <b>Esegui</b>. In <b>Rivedi autorizzazioni</b> spunta il permesso di <b>vedere, modificare, creare ed eliminare</b> i file di Drive (non quello di sola lettura), poi <b>Continua</b>. Se la finestra non si apre, fallo da Chrome sul PC.</li>
+        <li>Nell'elenco delle funzioni scegli <b>autorizzaDrive</b> e tocca <b>Esegui</b>, poi fai lo stesso con <b>autorizzaCalendario</b> (serve per le notifiche delle scadenze). In <b>Rivedi autorizzazioni</b> spunta il permesso di <b>vedere, modificare, creare ed eliminare</b> i file di Drive (non quello di sola lettura), poi <b>Continua</b>. Se la finestra non si apre, fallo da Chrome sul PC.</li>
         <li><b>Esegui il deployment → Gestisci deployment → matita ✏️ → Versione: Nuova versione</b>, poi conferma. L'indirizzo resta lo stesso.</li>
-        <li>Torna qui e attiva il backup. Va attivato sul dispositivo dove carichi i file.</li>
+        <li>Torna qui, imposta la password e attiva il backup. Va attivato sul dispositivo dove carichi i file.</li>
       </ol>
+      <div class="field">
+        <span class="field-label">🔒 Password del backup: su Drive i file e i dati vengono cifrati e si aprono solo con questa password. Se la dimentichi nessuno può recuperarla: salvala in Bitwarden. Le copie fatte prima della password non sono protette: cancellale dalla cartella "Jaccodo backup".</span>
+        <input id="backupPwd" type="password" autocomplete="new-password" placeholder="Password (almeno 8 caratteri)" aria-label="Password del backup">
+        <input id="backupPwd2" type="password" autocomplete="new-password" placeholder="Ripeti la password" aria-label="Ripeti la password">
+        <button type="button" id="backupPwdSave" class="chip">Imposta la password</button>
+      </div>
       <button type="button" id="backupOn" class="primary"></button>
       <div id="backupRelinkWrap" class="field" hidden>
         <span class="field-label">Scarica i file da Drive e sceglili qui: l'app li rimette al loro posto.</span>
@@ -208,6 +220,19 @@
         </label>
       </div>
       <button type="button" id="backupOff" class="danger" hidden>Disattiva su questo dispositivo</button>
+    </div>
+  </div>
+
+  <!-- Richiesta della password del backup -->
+  <div id="pwdSheet" class="sheet" hidden>
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <button type="button" class="link-btn" data-close>Annulla</button>
+        <strong>Password del backup</strong>
+        <button type="button" id="pwdOk" class="primary">OK</button>
+      </div>
+      <p id="pwdInfo" class="muted small"></p>
+      <input id="pwdInput" type="password" autocomplete="current-password" aria-label="Password del backup">
     </div>
   </div>
 
