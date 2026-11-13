@@ -61,7 +61,7 @@ const WORK_DAY = 3; // 0 = domenica ... 3 = mercoledì
 
 // ===== Dati =====
 const STORE_KEY = 'note-app-v1';
-const APP_VERSION = 19; // Deve coincidere con CACHE in sw.js.
+const APP_VERSION = 20; // Deve coincidere con CACHE in sw.js.
 let notes = load();
 // Le categorie si possono cambiare dall'app. "updated" dice quale versione è la più recente.
 const CAT_KEY = 'le-mie-cose-categorie';
@@ -319,7 +319,9 @@ function shorten(text, max) {
 // Un titolo lungo si accorcia togliendo le parole di legame; "non" e "se" restano perché cambiano il senso.
 const TITLE_MAX = 45;
 function shortTitle(title) {
-  if (!summaryOn || title.length <= TITLE_MAX) return title;
+  return !summaryOn || title.length <= TITLE_MAX ? title : compressTitle(title);
+}
+function compressTitle(title) {
   const kept = title.trim().split(/\s+/).map(w => w.replace(/^(?:dell|dall|nell|sull|all|l|d|un)['’]/i, '')).filter(w => {
     const bare = w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
     return bare === 'non' || bare === 'se' || !STOPWORDS.has(bare);
@@ -1697,23 +1699,19 @@ function removeFromMemo(text) {
   sync.pushCategories(catDoc);
   renderMemo();
 }
+// Il titolo nasce dalla prima riga, accorciata se è lunga.
+function memoTitle(text) {
+  const first = text.split('\n').map(l => l.replace(/^- (\[( |x)\] )?/i, '').replace(/\*\*|==/g, '').trim()).find(Boolean) || 'Memo';
+  return first.length > TITLE_MAX ? compressTitle(first) : first.charAt(0).toUpperCase() + first.slice(1);
+}
+// Tutto il memo diventa una nota; salvata la nota, il memo si svuota.
 $('memoToNote').onclick = () => {
-  const memo = $('memo');
-  const value = memo.value;
-  let start = memo.selectionStart;
-  let end = memo.selectionEnd;
-  if (start === end) {
-    start = value.lastIndexOf('\n', start - 1) + 1;
-    end = value.indexOf('\n', start);
-    if (end < 0) end = value.length;
-  }
-  const text = value.slice(start, end).trim();
-  if (!text) return toast('Tocca una riga del memo, poi il pulsante');
-  const [first, ...rest] = text.split('\n');
+  const text = $('memo').value.trim();
+  if (!text) return toast('Il memo è vuoto');
   openEditor('note');
   memoMove = text;
-  $('fTitle').value = first.trim();
-  $('fBody').value = rest.join('\n').trim();
+  $('fTitle').value = memoTitle(text);
+  $('fBody').value = text;
   bodyLength = $('fBody').value.length;
   renderBodyPreview();
 };
